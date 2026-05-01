@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { SteamRuntimeConfig, SteamStateDirectories } from '../types.js';
+import { normalizeAbsolutePath, normalizeOptionalAbsolutePath } from '../utils.js';
 
 export class ConfigService {
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
@@ -8,8 +9,8 @@ export class ConfigService {
   resolve(): SteamRuntimeConfig {
     return {
       steamId: this.env.STEAM_ID,
-      installDirOverride: this.env.STEAM_INSTALL_DIR,
-      userdataDirOverride: this.env.STEAM_USERDATA_DIR,
+      installDirOverride: normalizeOptionalAbsolutePath(this.env.STEAM_INSTALL_DIR),
+      userdataDirOverride: normalizeOptionalAbsolutePath(this.env.STEAM_USERDATA_DIR),
       stateDirectories: this.resolveStateDirectories(),
       collectionWritesEnabled: this.env.STEAM_ENABLE_COLLECTION_WRITES === '1'
     };
@@ -27,15 +28,16 @@ export class ConfigService {
   }
 
   private resolveStateDirectories(): SteamStateDirectories {
-    const configuredRoot = this.env.STEAM_MCP_STATE_DIR;
-    const localAppData = this.env.LOCALAPPDATA ?? path.join(this.env.HOME ?? process.cwd(), 'AppData', 'Local');
-    const root = configuredRoot ?? path.join(localAppData, 'steam-mcp');
+    const configuredRoot = normalizeOptionalAbsolutePath(this.env.STEAM_MCP_STATE_DIR);
+    const localAppData = normalizeOptionalAbsolutePath(this.env.LOCALAPPDATA)
+      ?? normalizeAbsolutePath(path.join(this.env.HOME ?? process.cwd(), 'AppData', 'Local'));
+    const root = configuredRoot ?? normalizeAbsolutePath(path.join(localAppData, 'steam-mcp'));
 
     return {
       root,
-      plansDir: path.join(root, 'plans'),
-      backupsDir: path.join(root, 'backups'),
-      logsDir: path.join(root, 'logs')
+      plansDir: normalizeAbsolutePath(path.join(root, 'plans')),
+      backupsDir: normalizeAbsolutePath(path.join(root, 'backups')),
+      logsDir: normalizeAbsolutePath(path.join(root, 'logs'))
     };
   }
 }

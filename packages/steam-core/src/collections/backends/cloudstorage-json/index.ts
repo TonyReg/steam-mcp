@@ -1,14 +1,17 @@
 import { readFile } from 'node:fs/promises';
 import type { CollectionPlan, CollectionSnapshot } from '../../../types.js';
-import { appIdString, hashValue, isRecord, parseJson, slugify, stableStringify, toBoolean, uniqueStrings } from '../../../utils.js';
+import { appIdString, hashValue, isRecord, normalizeAbsolutePath, parseJson, slugify, stableStringify, toBoolean, uniqueStrings } from '../../../utils.js';
 import type { CollectionBackendAdapter, CollectionBackendApplyDraft } from '../../types.js';
 
 type CloudStorageDocument = Record<string, unknown>;
 
 export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapter {
   readonly backendId = 'cloudstorage-json';
+  private readonly sourcePath: string;
 
-  constructor(private readonly sourcePath: string, private readonly steamId: string) {}
+  constructor(sourcePath: string, private readonly steamId: string) {
+    this.sourcePath = normalizeAbsolutePath(sourcePath);
+  }
 
   async detect(): Promise<boolean> {
     try {

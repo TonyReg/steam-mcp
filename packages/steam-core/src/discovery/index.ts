@@ -2,7 +2,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { parse } from '@node-steam/vdf';
 import type { SteamDiscoveryResult, SteamRuntimeConfig } from '../types.js';
-import { isRecord } from '../utils.js';
+import { isRecord, normalizeAbsolutePath } from '../utils.js';
 
 export class SteamDiscoveryService {
   constructor(private readonly config: SteamRuntimeConfig) {}
@@ -10,18 +10,18 @@ export class SteamDiscoveryService {
   async discover(): Promise<SteamDiscoveryResult> {
     const warnings: string[] = [];
     const installDir = await this.resolveInstallDir();
-    const userdataDir = this.config.userdataDirOverride ?? (installDir ? path.join(installDir, 'userdata') : undefined);
+    const userdataDir = this.config.userdataDirOverride ?? (installDir ? normalizeAbsolutePath(path.join(installDir, 'userdata')) : undefined);
     const userIds = userdataDir ? await this.readSteamUserIds(userdataDir) : [];
 
     const selectedUserId = this.selectUserId(userIds, warnings);
-    const selectedUserDir = selectedUserId && userdataDir ? path.join(userdataDir, selectedUserId) : undefined;
+    const selectedUserDir = selectedUserId && userdataDir ? normalizeAbsolutePath(path.join(userdataDir, selectedUserId)) : undefined;
     const libraryFolders = installDir ? await this.readLibraryFolders(installDir, warnings) : [];
 
     const collectionSourcePath = selectedUserDir
-      ? path.join(selectedUserDir, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json')
+      ? normalizeAbsolutePath(path.join(selectedUserDir, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json'))
       : undefined;
     const collectionBackendId = collectionSourcePath && await exists(collectionSourcePath) ? 'cloudstorage-json' : undefined;
-    const localConfigPath = selectedUserDir ? path.join(selectedUserDir, 'config', 'localconfig.vdf') : undefined;
+    const localConfigPath = selectedUserDir ? normalizeAbsolutePath(path.join(selectedUserDir, 'config', 'localconfig.vdf')) : undefined;
 
     if (!installDir) {
       warnings.push('Steam install directory could not be detected. Set STEAM_INSTALL_DIR for deterministic discovery.');
@@ -51,7 +51,7 @@ export class SteamDiscoveryService {
 
   private async resolveInstallDir(): Promise<string | undefined> {
     if (this.config.installDirOverride && await exists(this.config.installDirOverride)) {
-      return this.config.installDirOverride;
+      return normalizeAbsolutePath(this.config.installDirOverride);
     }
 
     const candidates = [
@@ -61,7 +61,7 @@ export class SteamDiscoveryService {
 
     for (const candidate of candidates) {
       if (await exists(candidate)) {
-        return candidate;
+        return normalizeAbsolutePath(candidate);
       }
     }
 
@@ -98,7 +98,7 @@ export class SteamDiscoveryService {
   }
 
   private async readLibraryFolders(installDir: string, warnings: string[]): Promise<string[]> {
-    const libraryFoldersPath = path.join(installDir, 'steamapps', 'libraryfolders.vdf');
+    const libraryFoldersPath = normalizeAbsolutePath(path.join(installDir, 'steamapps', 'libraryfolders.vdf'));
     if (!await exists(libraryFoldersPath)) {
       warnings.push('libraryfolders.vdf was not found.');
       return [installDir];
@@ -112,19 +112,19 @@ export class SteamDiscoveryService {
       return [installDir];
     }
 
-    const folders = new Set<string>([installDir]);
+    const folders = new Set<string>([normalizeAbsolutePath(installDir)]);
     for (const [key, value] of Object.entries(record)) {
       if (!/^\d+$/.test(key)) {
         continue;
       }
 
       if (typeof value === 'string') {
-        folders.add(value);
+        folders.add(normalizeAbsolutePath(value));
         continue;
       }
 
       if (isRecord(value) && typeof value.path === 'string') {
-        folders.add(value.path);
+        folders.add(normalizeAbsolutePath(value.path));
       }
     }
 
