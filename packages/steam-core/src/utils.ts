@@ -1,4 +1,7 @@
+import path from 'node:path';
 import { createHash } from 'node:crypto';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -19,6 +22,40 @@ export function stableStringify(value: unknown): string {
 
 export function hashValue(value: unknown): string {
   return createHash('sha256').update(stableStringify(value)).digest('hex');
+}
+
+export function normalizeAbsolutePath(value: string): string {
+  return path.normalize(path.resolve(value));
+}
+
+export function normalizeOptionalAbsolutePath(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : normalizeAbsolutePath(trimmed);
+}
+
+export function ensurePathInsideRoot(targetPath: string, rootDir: string, label = 'Path'): string {
+  const normalizedTarget = normalizeAbsolutePath(targetPath);
+  const normalizedRoot = normalizeAbsolutePath(rootDir);
+  const relative = path.relative(normalizedRoot, normalizedTarget);
+
+  if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+    return normalizedTarget;
+  }
+
+  throw new Error(`${label} ${normalizedTarget} escapes root ${normalizedRoot}.`);
+}
+
+export function normalizeUuid(value: string, label = 'value'): string {
+  const normalized = value.trim().toLowerCase();
+  if (!UUID_PATTERN.test(normalized)) {
+    throw new Error(`${label} must be a UUID.`);
+  }
+
+  return normalized;
 }
 
 export function toNumber(value: unknown): number | undefined {
