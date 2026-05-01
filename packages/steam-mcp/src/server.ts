@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createSteamMcpContext } from './context.js';
+import { registerSteamPrompts } from './prompts/index.js';
 import { registerSteamCollectionApplyTool } from './tools/steam-collection-apply.js';
 import { registerSteamCollectionPlanTool } from './tools/steam-collection-plan.js';
 import { registerSteamExportTool } from './tools/steam-export.js';
@@ -27,6 +28,7 @@ export function createServer(env: NodeJS.ProcessEnv = process.env): McpServer {
   registerSteamCollectionApplyTool(server, context);
   registerSteamExportTool(server, context);
   registerSteamLinkGenerateTool(server, context);
+  registerSteamPrompts(server, context);
 
   return server;
 }

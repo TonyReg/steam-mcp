@@ -38,6 +38,24 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     'steam_store_search'
   ]);
 
+  const prompts = await client.listPrompts();
+  const promptNames = prompts.prompts.map((prompt) => prompt.name).sort((left, right) => left.localeCompare(right));
+  assert.deepEqual(promptNames, [
+    'steam_collection_planner',
+    'steam_deck_backlog_triage',
+    'steam_library_curator'
+  ]);
+
+  const collectionPlannerPrompt = await client.getPrompt({
+    name: 'steam_collection_planner',
+    arguments: {
+      request: 'Group co-op favorites',
+      mode: 'merge'
+    }
+  });
+  assert.match(JSON.stringify(collectionPlannerPrompt), /steam_collection_plan/);
+  assert.match(JSON.stringify(collectionPlannerPrompt), /Group co-op favorites/);
+
   const status = await client.callTool({ name: 'steam_status', arguments: {} });
   assert.match(JSON.stringify(status), /cloudstorage-json/);
 
