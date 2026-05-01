@@ -43,6 +43,14 @@ docs/design/
 - `steam_export`
 - `steam_link_generate`
 
+## MCP prompts
+
+- `steam_library_curator`
+- `steam_collection_planner`
+- `steam_deck_backlog_triage`
+
+These prompts are the v1 agent-facing workflow surface. They guide clients toward the safe tool order, keep collection changes plan-first, and do not bypass the Steam-owned write gate.
+
 ## Environment
 
 - `STEAM_ID`
@@ -82,3 +90,4 @@ npm test
 ## Docs
 
 - `docs/design/windows-first-steam-mcp-v1.md`
+- `docs/prompts/steam-mcp-agent-prompts.md`
