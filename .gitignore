@@ -86,3 +86,9 @@ typings/
 
 # DynamoDB Local files
 .dynamodb/
+
+# Workspace build output
+dist/
+
+# MCP local state
+.tmp/

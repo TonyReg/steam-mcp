@@ -1,0 +1,21 @@
+{
+  "name": "@steam-mcp/steam-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "steam-mcp": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@steam-mcp/steam-core": "file:../steam-core",
+    "zod": "^3.25.76"
+  }
+}

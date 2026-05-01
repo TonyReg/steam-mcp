@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/steam-core"
+    },
+    {
+      "path": "./packages/steam-mcp"
+    }
+  ]
+}
