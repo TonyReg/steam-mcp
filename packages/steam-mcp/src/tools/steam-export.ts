@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SteamMcpContext } from '../context.js';
+import { registerToolShallow } from '../mcp/register-tool-shallow.js';
 import { exportFormatSchema } from '../schemas/index.js';
 
 const steamExportInputShape = {
@@ -14,14 +15,15 @@ const steamExportArgsSchema = z.object(steamExportInputShape);
 const steamExportInputSchema: Record<string, z.ZodTypeAny> = steamExportInputShape;
 
 export function registerSteamExportTool(server: McpServer, context: SteamMcpContext): void {
-  server.registerTool(
+  registerToolShallow(
+    server,
     'steam_export',
     {
       title: 'Steam export',
       description: 'Render library or plan data to JSON or Markdown without writing export files to disk.',
       inputSchema: steamExportInputSchema
     },
-    async (rawArgs) => {
+    async (rawArgs: unknown) => {
       const args = steamExportArgsSchema.parse(rawArgs);
       if (args.source === 'plan') {
         if (!args.planId) {

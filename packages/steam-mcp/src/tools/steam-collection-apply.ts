@@ -1,40 +1,11 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SteamMcpContext } from '../context.js';
-
-type SteamCollectionApplyToolResult = {
-  content: Array<{
-    type: 'text';
-    text: string;
-  }>;
-};
-
-type SteamCollectionApplyToolConfig = {
-  title?: string;
-  description?: string;
-  inputSchema?: z.ZodTypeAny;
-};
-
-type SteamCollectionApplyToolHandler = (
-  rawArgs: unknown
-) => SteamCollectionApplyToolResult | Promise<SteamCollectionApplyToolResult>;
-
-function registerToolShallow(
-  server: McpServer,
-  name: string,
-  config: SteamCollectionApplyToolConfig,
-  cb: SteamCollectionApplyToolHandler
-): void {
-  const registerTool: unknown = Reflect.get(server, 'registerTool');
-  if (typeof registerTool !== 'function') {
-    throw new Error('McpServer.registerTool is unavailable.');
-  }
-
-  registerTool.call(server, name, config, cb);
-}
+import { registerToolShallow } from '../mcp/register-tool-shallow.js';
+import { planIdSchema } from '../schemas/index.js';
 
 const steamCollectionApplyInputShape = {
-  planId: z.string().min(1),
+  planId: planIdSchema,
   dryRun: z.boolean().optional(),
   requireSteamClosed: z.boolean().optional()
 };

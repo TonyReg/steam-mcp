@@ -2,37 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SteamMcpContext } from '../context.js';
 import { planModeSchema } from '../schemas/index.js';
-
-type SteamCollectionPlanToolResult = {
-  content: Array<{
-    type: 'text';
-    text: string;
-  }>;
-};
-
-type SteamCollectionPlanToolConfig = {
-  title?: string;
-  description?: string;
-  inputSchema?: z.ZodTypeAny;
-};
-
-type SteamCollectionPlanToolHandler = (
-  rawArgs: unknown
-) => SteamCollectionPlanToolResult | Promise<SteamCollectionPlanToolResult>;
-
-function registerToolShallow(
-  server: McpServer,
-  name: string,
-  config: SteamCollectionPlanToolConfig,
-  cb: SteamCollectionPlanToolHandler
-): void {
-  const registerTool: unknown = Reflect.get(server, 'registerTool');
-  if (typeof registerTool !== 'function') {
-    throw new Error('McpServer.registerTool is unavailable.');
-  }
-
-  registerTool.call(server, name, config, cb);
-}
+import { registerToolShallow } from '../mcp/register-tool-shallow.js';
 
 const steamCollectionRuleSchema = z.object({
   appIds: z.array(z.number().int().positive()).optional(),
