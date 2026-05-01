@@ -3,8 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
+import { ensurePathInsideRoot, normalizeAbsolutePath } from '../utils.js';
 
 const execFile = promisify(execFileCallback);
+const COLLECTION_FILE_NAME = 'cloud-storage-namespace-1.json';
 
 export class SafetyService {
   constructor(private readonly steamRunningDetector?: () => Promise<boolean>) {}
@@ -27,20 +29,40 @@ export class SafetyService {
   }
 
   async createBackup(sourcePath: string, backupsDir: string): Promise<string> {
-    await mkdir(backupsDir, { recursive: true });
-    const backupPath = path.join(backupsDir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${path.basename(sourcePath)}`);
-    await copyFile(sourcePath, backupPath);
+    const normalizedSourcePath = normalizeAbsolutePath(sourcePath);
+    const normalizedBackupsDir = normalizeAbsolutePath(backupsDir);
+
+    await mkdir(normalizedBackupsDir, { recursive: true });
+    const backupPath = path.join(normalizedBackupsDir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${path.basename(normalizedSourcePath)}`);
+    await copyFile(normalizedSourcePath, backupPath);
     return backupPath;
   }
 
   async atomicWrite(targetPath: string, content: string): Promise<void> {
-    const tempPath = `${targetPath}.tmp`;
+    const normalizedTargetPath = normalizeAbsolutePath(targetPath);
+    const tempPath = `${normalizedTargetPath}.tmp`;
     await writeFile(tempPath, content, 'utf8');
-    await rename(tempPath, targetPath);
+    await rename(tempPath, normalizedTargetPath);
   }
 
   async rollback(targetPath: string, backupPath: string): Promise<void> {
-    const content = await readFile(backupPath, 'utf8');
-    await this.atomicWrite(targetPath, content);
+    const content = await readFile(normalizeAbsolutePath(backupPath), 'utf8');
+    await this.atomicWrite(normalizeAbsolutePath(targetPath), content);
+  }
+
+  assertCollectionWriteTarget(targetPath: string, selectedUserDir: string): string {
+    const normalizedUserDir = normalizeAbsolutePath(selectedUserDir);
+    const expectedDirectory = ensurePathInsideRoot(
+      path.join(normalizedUserDir, 'config', 'cloudstorage'),
+      normalizedUserDir,
+      'Steam cloudstorage directory'
+    );
+    const normalizedTargetPath = ensurePathInsideRoot(targetPath, expectedDirectory, 'Steam collection target');
+
+    if (path.basename(normalizedTargetPath).toLowerCase() !== COLLECTION_FILE_NAME) {
+      throw new Error(`Steam collection writes are limited to ${COLLECTION_FILE_NAME}.`);
+    }
+
+    return normalizedTargetPath;
   }
 }

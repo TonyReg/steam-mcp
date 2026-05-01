@@ -14,7 +14,7 @@ import type {
   GameRecord,
   PlanMode
 } from '../types.js';
-import { appIdString, nowIso, uniqueStrings } from '../utils.js';
+import { appIdString, ensurePathInsideRoot, normalizeUuid, nowIso, uniqueStrings } from '../utils.js';
 import type { SteamDiscoveryService } from '../discovery/index.js';
 import type { SafetyService } from '../safety/index.js';
 import type { CollectionBackendRegistry } from './backend-registry/index.js';
@@ -83,7 +83,7 @@ export class CollectionService {
       operations,
       warnings: uniqueStrings(warnings),
       sourceRequest: request.request,
-      planPath: path.join(directories.plansDir, `${planId}.json`)
+      planPath: this.resolvePlanPath(planId, directories.plansDir)
     };
 
     await writeFile(plan.planPath, `${JSON.stringify(plan, null, 2)}\n`, 'utf8');
@@ -96,6 +96,7 @@ export class CollectionService {
   }
 
   async applyPlan(planId: string, options: CollectionApplyOptions = {}): Promise<CollectionApplyResult> {
+    const normalizedPlanId = normalizeUuid(planId, 'planId');
     const config = this.configService.resolve();
     const discovery = await this.discoveryService.discover();
 
@@ -103,7 +104,7 @@ export class CollectionService {
       throw new Error('Collection writes are disabled. Set STEAM_ENABLE_COLLECTION_WRITES=1 to enable steam_collection_apply.');
     }
 
-    if (!discovery.selectedUserId || !discovery.collectionBackendId || !discovery.collectionSourcePath) {
+    if (!discovery.selectedUserId || !discovery.selectedUserDir || !discovery.collectionBackendId || !discovery.collectionSourcePath) {
       throw new Error('No writable cloudstorage-json backend is available for the selected Steam user.');
     }
 
@@ -120,7 +121,7 @@ export class CollectionService {
       throw new Error(`Collection backend ${discovery.collectionBackendId} is not registered.`);
     }
 
-    const planPath = path.join(config.stateDirectories.plansDir, `${planId}.json`);
+    const planPath = this.resolvePlanPath(normalizedPlanId, config.stateDirectories.plansDir);
     const plan = JSON.parse(await readFile(planPath, 'utf8')) as CollectionPlan;
     const snapshot = await backend.readSnapshot();
     const validationWarnings = backend.validatePlan(plan, snapshot);
@@ -131,7 +132,7 @@ export class CollectionService {
     const appliedOperationCount = Object.keys(plan.operations).length;
     if (options.dryRun) {
       return {
-        planId,
+        planId: normalizedPlanId,
         dryRun: true,
         backendId: backend.backendId,
         appliedOperationCount,
@@ -140,18 +141,19 @@ export class CollectionService {
       };
     }
 
-    const backupPath = await this.safetyService.createBackup(discovery.collectionSourcePath, config.stateDirectories.backupsDir);
+    const collectionTargetPath = this.safetyService.assertCollectionWriteTarget(discovery.collectionSourcePath, discovery.selectedUserDir);
+    const backupPath = await this.safetyService.createBackup(collectionTargetPath, config.stateDirectories.backupsDir);
 
     try {
       const draft = await backend.applyPlan(plan, snapshot);
-      await this.safetyService.atomicWrite(discovery.collectionSourcePath, draft.nextDocument);
+      await this.safetyService.atomicWrite(collectionTargetPath, draft.nextDocument);
       const verifySnapshot = await backend.readSnapshot();
       if (verifySnapshot.snapshotHash !== draft.expectedSnapshotHash) {
         throw new Error('Post-write verification failed because the snapshot hash did not match the expected result.');
       }
 
       return {
-        planId,
+        planId: normalizedPlanId,
         dryRun: false,
         backendId: backend.backendId,
         appliedOperationCount,
@@ -161,15 +163,20 @@ export class CollectionService {
         skipped: []
       };
     } catch (error) {
-      await this.safetyService.rollback(discovery.collectionSourcePath, backupPath);
+      await this.safetyService.rollback(collectionTargetPath, backupPath);
       throw error;
     }
   }
 
   async readPlan(planId: string): Promise<CollectionPlan> {
     const config = this.configService.resolve();
-    const planPath = path.join(config.stateDirectories.plansDir, `${planId}.json`);
+    const planPath = this.resolvePlanPath(planId, config.stateDirectories.plansDir);
     return JSON.parse(await readFile(planPath, 'utf8')) as CollectionPlan;
+  }
+
+  private resolvePlanPath(planId: string, plansDir: string): string {
+    const normalizedPlanId = normalizeUuid(planId, 'planId');
+    return ensurePathInsideRoot(path.join(plansDir, `${normalizedPlanId}.json`), plansDir, 'Collection plan path');
   }
 
   private async resolveRuleGames(rule: CollectionRule, library: GameRecord[]): Promise<GameRecord[]> {
