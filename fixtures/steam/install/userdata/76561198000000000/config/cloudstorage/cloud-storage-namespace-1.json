@@ -1,0 +1,28 @@
+{
+  "user-collections.favorite": [
+    "620"
+  ],
+  "user-collections.hidden": {
+    "440": true
+  },
+  "user-collections.uc-puzzle": {
+    "name": "Puzzle",
+    "apps": [
+      "620"
+    ],
+    "description": "Preserve me"
+  },
+  "user-collections.uc-multiplayer": {
+    "title": "Multiplayer",
+    "appids": {
+      "440": true,
+      "570": true
+    },
+    "metadata": {
+      "origin": "fixture"
+    }
+  },
+  "unrelated-section": {
+    "preserve": true
+  }
+}

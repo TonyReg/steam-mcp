@@ -1,0 +1,36 @@
+{
+  "620": {
+    "success": true,
+    "data": {
+      "name": "Portal 2",
+      "developers": [
+        "Valve"
+      ],
+      "publishers": [
+        "Valve"
+      ],
+      "genres": [
+        {
+          "id": "23",
+          "description": "Adventure"
+        },
+        {
+          "id": "2",
+          "description": "Puzzle"
+        }
+      ],
+      "categories": [
+        {
+          "id": 2,
+          "description": "Single-player"
+        }
+      ],
+      "tags": [
+        "Puzzle",
+        "Co-op"
+      ],
+      "short_description": "The highly anticipated sequel.",
+      "header_image": "https://cdn.example/portal2.jpg"
+    }
+  }
+}

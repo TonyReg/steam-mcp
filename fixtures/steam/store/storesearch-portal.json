@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "id": 620,
+      "name": "Portal 2",
+      "price": "$9.99",
+      "is_free": false,
+      "tiny_image": "https://cdn.example/portal2-thumb.jpg",
+      "developers": [
+        "Valve"
+      ],
+      "publishers": [
+        "Valve"
+      ],
+      "genres": [
+        "Puzzle"
+      ],
+      "tags": [
+        "Puzzle",
+        "Co-op"
+      ]
+    }
+  ]
+}

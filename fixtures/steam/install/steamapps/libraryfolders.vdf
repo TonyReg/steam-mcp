@@ -1,0 +1,22 @@
+"libraryfolders"
+{
+  "0"
+  {
+    "path" "__INSTALL_DIR__"
+    "label" ""
+    "apps"
+    {
+      "440" "1"
+      "620" "1"
+    }
+  }
+  "1"
+  {
+    "path" "__SECOND_LIBRARY__"
+    "label" "Games"
+    "apps"
+    {
+      "570" "1"
+    }
+  }
+}
