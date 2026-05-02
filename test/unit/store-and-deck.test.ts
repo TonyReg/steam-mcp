@@ -53,3 +53,43 @@ test('deck status provider uses the live nAppID request contract', async () => {
   assert.equal(requestUrl.searchParams.get('nAppID'), '620');
   assert.equal(requestUrl.searchParams.has('appid'), false);
 });
+
+test('deck status provider does not cache non-ok responses as unknown', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const deckPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'deck-620.json'), 'utf8');
+  let requestCount = 0;
+
+  const provider = new DeckStatusProvider(async () => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
+    }
+
+    return new Response(deckPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  });
+
+  const firstStatus = await provider.getStatus(620);
+  const secondStatus = await provider.getStatus(620);
+
+  assert.equal(firstStatus, 'unknown');
+  assert.equal(secondStatus, 'verified');
+  assert.equal(requestCount, 2);
+});
+
+test('deck status provider limits concurrent lookups', async () => {
+  let activeRequests = 0;
+  let maxActiveRequests = 0;
+
+  const provider = new DeckStatusProvider(async () => {
+    activeRequests += 1;
+    maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    activeRequests -= 1;
+    return new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  }, 2);
+
+  const statuses = await Promise.all([620, 440, 570, 730, 400].map((appId) => provider.getStatus(appId)));
+
+  assert.deepEqual(statuses, ['verified', 'verified', 'verified', 'verified', 'verified']);
+  assert.ok(maxActiveRequests <= 2);
+});
