@@ -46,15 +46,20 @@ export class CollectionService {
       throw new Error(`Collection backend ${discovery.collectionBackendId} is not registered.`);
     }
 
-    const [snapshot, library] = await Promise.all([
-      backend.readSnapshot(),
-      this.libraryService.list({ includeStoreMetadata: false, includeDeckStatus: false, limit: 5000 })
-    ]);
-
     const policies = normalizePolicies({
       readOnlyGroups: [...config.defaultReadOnlyGroups, ...(request.readOnlyGroups ?? [])],
       ignoreGroups: [...config.defaultIgnoreGroups, ...(request.ignoreGroups ?? [])]
     });
+
+    const [snapshot, library] = await Promise.all([
+      backend.readSnapshot(),
+      this.libraryService.list({
+        includeStoreMetadata: false,
+        includeDeckStatus: false,
+        ignoreGroups: policies.ignoreGroups,
+        limit: 5000
+      })
+    ]);
     const rules = normalizeRules(request);
     const warnings = [...snapshot.sourcePath ? [] : ['Collection source path is missing.']];
     const operations: CollectionPlan['operations'] = {};
