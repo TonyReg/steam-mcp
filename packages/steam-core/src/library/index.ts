@@ -8,7 +8,7 @@ import type { LinkService } from '../links/index.js';
 import type { CollectionBackendRegistry } from '../collections/backend-registry/index.js';
 import type { GameRecord, LibraryListOptions, LibraryListResult, StoreAppDetails } from '../types.js';
 import type { StoreClient } from '../store/index.js';
-import { appIdString, isRecord, toNumber, uniqueStrings } from '../utils.js';
+import { appIdString, isRecord, normalizeCollectionName, toNumber, uniqueStrings } from '../utils.js';
 
 interface LocalAppState {
   playtimeMinutes?: number;
@@ -217,8 +217,8 @@ function filterGame(game: GameRecord, options: LibraryListOptions): boolean {
   }
 
   if (options.collections?.length) {
-    const collections = new Set(game.collections ?? []);
-    if (!options.collections.every((collection) => collections.has(collection))) {
+    const collections = new Set((game.collections ?? []).map((collection) => normalizeCollectionName(collection)));
+    if (!options.collections.every((collection) => collections.has(normalizeCollectionName(collection)))) {
       return false;
     }
   }

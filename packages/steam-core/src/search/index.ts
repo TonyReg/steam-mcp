@@ -1,5 +1,5 @@
 import type { GameRecord, LibrarySearchOptions, SearchMatch } from '../types.js';
-import { normalizeWhitespace } from '../utils.js';
+import { normalizeCollectionName, normalizeWhitespace } from '../utils.js';
 
 export class SearchService {
   searchLibrary(games: GameRecord[], options: LibrarySearchOptions): SearchMatch<GameRecord>[] {
@@ -59,8 +59,8 @@ export class SearchService {
     }
 
     if (options.collections?.length) {
-      const collectionSet = new Set(game.collections ?? []);
-      if (!options.collections.every((collection) => collectionSet.has(collection))) {
+      const collectionSet = new Set((game.collections ?? []).map((collection) => normalizeCollectionName(collection)));
+      if (!options.collections.every((collection) => collectionSet.has(normalizeCollectionName(collection)))) {
         return false;
       }
     }

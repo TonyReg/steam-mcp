@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import {
@@ -48,6 +49,30 @@ test('library service joins manifests, localconfig, and cloudstorage collections
   const dota2 = result.games.find((game) => game.appId === 570);
   assert.ok(dota2);
   assert.deepEqual(dota2.collections, ['Multiplayer']);
+});
+
+test('library service matches collection filters case-insensitively', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  const config = new ConfigService(fixture.env).resolve();
+  const discovery = new SteamDiscoveryService(config);
+  const backend = new CloudStorageJsonCollectionBackend(
+    path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json'),
+    fixture.steamId
+  );
+  const library = new LibraryService(
+    discovery,
+    new CollectionBackendRegistry([backend]),
+    new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new LinkService()
+  );
+
+  const puzzle = await library.list({ includeStoreMetadata: false, includeDeckStatus: false, collections: [' puzzle '], limit: 10 });
+  assert.deepEqual(puzzle.games.map((game) => game.appId), [620]);
+
+  const multiplayer = await library.list({ includeStoreMetadata: false, includeDeckStatus: false, collections: ['MULTIPLAYER'], limit: 10 });
+  assert.deepEqual(multiplayer.games.map((game) => game.appId).sort((left, right) => left - right), [440, 570]);
 });
 
 test('library service reads live-style pair-array cloudstorage collections', async () => {
@@ -154,4 +179,32 @@ test('library service resolves deck statuses through the live nAppID request con
     assert.ok(requestUrl.searchParams.has('nAppID'));
     assert.equal(requestUrl.searchParams.has('appid'), false);
   }
+});
+
+test('library service rejects ambiguous collection names that differ only by case', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  const sourcePath = path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json');
+  const document = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>;
+  document['user-collections.uc-puzzle-copy'] = {
+    name: 'puzzle',
+    apps: ['440']
+  };
+  await writeFile(sourcePath, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
+
+  const config = new ConfigService(fixture.env).resolve();
+  const discovery = new SteamDiscoveryService(config);
+  const backend = new CloudStorageJsonCollectionBackend(sourcePath, fixture.steamId);
+  const library = new LibraryService(
+    discovery,
+    new CollectionBackendRegistry([backend]),
+    new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new LinkService()
+  );
+
+  await assert.rejects(
+    () => library.list({ includeStoreMetadata: false, includeDeckStatus: false, limit: 10 }),
+    /ambiguous collection names Puzzle and puzzle/
+  );
 });
