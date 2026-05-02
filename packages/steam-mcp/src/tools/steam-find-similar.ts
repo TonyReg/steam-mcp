@@ -9,7 +9,8 @@ const steamFindSimilarInputShape = {
   query: z.string().min(1).optional(),
   scope: z.enum(['library', 'store', 'both']).optional(),
   deckStatuses: z.array(deckStatusSchema).optional(),
-  limit: z.number().int().min(1).max(100).optional()
+  limit: z.number().int().min(1).max(100).optional(),
+  ignoreGroups: z.array(z.string()).optional()
 };
 
 const steamFindSimilarArgsSchema = z.object(steamFindSimilarInputShape);
@@ -36,9 +37,10 @@ export function registerSteamFindSimilarTool(server: McpServer, context: SteamMc
         };
       }
 
+      const ignoredGroups = new Set((args.ignoreGroups ?? []).map((group) => group.trim().toLowerCase()).filter((group) => group !== ''));
       const seedGames = args.seedAppIds?.length
-        ? library.games.filter((game) => args.seedAppIds?.includes(game.appId))
-        : library.games.filter((game) => args.query ? game.name.toLowerCase().includes(args.query.toLowerCase()) : false).slice(0, 3);
+        ? library.games.filter((game) => args.seedAppIds?.includes(game.appId) && !isIgnoredGame(game.collections, ignoredGroups))
+        : library.games.filter((game) => args.query ? game.name.toLowerCase().includes(args.query.toLowerCase()) : false).filter((game) => !isIgnoredGame(game.collections, ignoredGroups)).slice(0, 3);
       const storeCandidates = await context.storeClient.search({ query: args.query ?? seedGames[0]?.name ?? '', deckStatuses: args.deckStatuses, limit: args.limit ?? 20 });
       const storeMatches = context.recommendService.rankSimilarStoreCandidates(seedGames, storeCandidates);
       const result = scope === 'store'
@@ -50,4 +52,12 @@ export function registerSteamFindSimilarTool(server: McpServer, context: SteamMc
       };
     }
   );
+}
+
+function isIgnoredGame(collections: string[] | undefined, ignoredGroups: Set<string>): boolean {
+  if (ignoredGroups.size === 0) {
+    return false;
+  }
+
+  return (collections ?? []).some((collection) => ignoredGroups.has(collection.trim().toLowerCase()));
 }

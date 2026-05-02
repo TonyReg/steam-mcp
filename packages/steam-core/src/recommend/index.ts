@@ -1,9 +1,10 @@
 import type { GameRecord, SearchMatch, SimilarRequest, StoreSearchCandidate } from '../types.js';
-import { uniqueStrings } from '../utils.js';
+import { normalizeCollectionName, toCollectionNameSet, uniqueStrings } from '../utils.js';
 
 export class RecommendService {
   rankSimilarLibraryGames(games: GameRecord[], request: SimilarRequest): SearchMatch<GameRecord>[] {
-    const seedGames = this.resolveSeedGames(games, request);
+    const ignoredCollections = toCollectionNameSet(request.ignoreGroups);
+    const seedGames = this.resolveSeedGames(games, request, ignoredCollections);
     if (seedGames.length === 0) {
       return [];
     }
@@ -12,6 +13,7 @@ export class RecommendService {
 
     return games
       .filter((game) => !seedGames.some((seed) => seed.appId === game.appId))
+      .filter((game) => !isIgnoredByCollections(game, ignoredCollections))
       .filter((game) => !request.deckStatuses?.length || (game.deckStatus !== undefined && request.deckStatuses.includes(game.deckStatus)))
       .map((game) => {
         const reasons: string[] = [];
@@ -71,18 +73,31 @@ export class RecommendService {
       .sort((left, right) => right.score - left.score || left.item.name.localeCompare(right.item.name));
   }
 
-  private resolveSeedGames(games: GameRecord[], request: SimilarRequest): GameRecord[] {
+  private resolveSeedGames(games: GameRecord[], request: SimilarRequest, ignoredCollections: Set<string>): GameRecord[] {
     if (request.seedAppIds?.length) {
-      return games.filter((game) => request.seedAppIds?.includes(game.appId));
+      return games
+        .filter((game) => request.seedAppIds?.includes(game.appId))
+        .filter((game) => !isIgnoredByCollections(game, ignoredCollections));
     }
 
     if (request.query) {
       const normalizedQuery = request.query.toLowerCase();
-      return games.filter((game) => game.name.toLowerCase().includes(normalizedQuery)).slice(0, 3);
+      return games
+        .filter((game) => game.name.toLowerCase().includes(normalizedQuery))
+        .filter((game) => !isIgnoredByCollections(game, ignoredCollections))
+        .slice(0, 3);
     }
 
     return [];
   }
+}
+
+function isIgnoredByCollections(game: GameRecord, ignoredCollections: Set<string>): boolean {
+  if (ignoredCollections.size === 0) {
+    return false;
+  }
+
+  return (game.collections ?? []).some((collection) => ignoredCollections.has(normalizeCollectionName(collection)));
 }
 
 function collectSignals(games: GameRecord[]): Set<string> {
