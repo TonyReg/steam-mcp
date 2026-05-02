@@ -49,12 +49,12 @@ test('stdio server registers exact tools and answers basic calls', async () => {
   const collectionPlannerPrompt = await client.getPrompt({
     name: 'steam_collection_planner',
     arguments: {
-      request: 'Group co-op favorites',
+      request: 'Group co-op hidden backlog',
       mode: 'merge'
     }
   });
   assert.match(JSON.stringify(collectionPlannerPrompt), /steam_collection_plan/);
-  assert.match(JSON.stringify(collectionPlannerPrompt), /Group co-op favorites/);
+  assert.match(JSON.stringify(collectionPlannerPrompt), /Group co-op hidden backlog/);
 
   const status = await client.callTool({ name: 'steam_status', arguments: {} });
   assert.match(JSON.stringify(status), /cloudstorage-json/);

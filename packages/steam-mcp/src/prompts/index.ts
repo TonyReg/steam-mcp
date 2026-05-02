@@ -61,7 +61,7 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
     'steam_collection_planner',
     {
       title: 'Steam collection planner',
-      description: 'Guide an agent through the safe, plan-first workflow for favorites, hidden flags, and named collections.',
+      description: 'Guide an agent through the safe, plan-first workflow for hidden flags, named collections, and request-scoped read-only or ignored groups.',
       argsSchema: steamCollectionPlannerPromptArgs
     },
     (rawArgs: unknown) => {
