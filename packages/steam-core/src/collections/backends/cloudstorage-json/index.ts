@@ -4,6 +4,15 @@ import { appIdString, hashValue, isRecord, normalizeAbsolutePath, parseJson, slu
 import type { CollectionBackendAdapter, CollectionBackendApplyDraft } from '../../types.js';
 
 type CloudStorageDocument = Record<string, unknown>;
+type CloudStorageDocumentFormat = 'object' | 'pair-array';
+
+const RESERVED_DOCUMENT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+interface ParsedCloudStorageDocument {
+  document: CloudStorageDocument;
+  format: CloudStorageDocumentFormat;
+  keyOrder: string[];
+}
 
 export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapter {
   readonly backendId = 'cloudstorage-json';
@@ -23,7 +32,7 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
   }
 
   async readSnapshot(): Promise<CollectionSnapshot> {
-    const document = await this.readDocument();
+    const { document } = await this.readDocument();
     return buildSnapshot(document, this.sourcePath, this.steamId, this.backendId);
   }
 
@@ -46,25 +55,180 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
   }
 
   async applyPlan(plan: CollectionPlan, snapshot: CollectionSnapshot): Promise<CollectionBackendApplyDraft> {
-    const document = await this.readDocument();
-    const nextDocument = updateDocument(document, plan, snapshot);
+    const parsedDocument = await this.readDocument();
+    const nextDocument = updateDocument(parsedDocument.document, plan, snapshot);
     const nextSnapshot = buildSnapshot(nextDocument, this.sourcePath, this.steamId, this.backendId);
 
     return {
-      nextDocument: `${JSON.stringify(nextDocument, null, 2)}\n`,
+      nextDocument: serializeDocument(nextDocument, parsedDocument.format, parsedDocument.keyOrder),
       expectedSnapshotHash: nextSnapshot.snapshotHash
     };
   }
 
-  private async readDocument(): Promise<CloudStorageDocument> {
+  private async readDocument(): Promise<ParsedCloudStorageDocument> {
     const text = await readFile(this.sourcePath, 'utf8');
     const parsed = parseJson(text);
-    if (!isRecord(parsed)) {
-      throw new Error(`Collection backend file ${this.sourcePath} is not a JSON object.`);
+    return normalizeDocument(parsed, this.sourcePath);
+  }
+}
+
+function normalizeDocument(parsed: unknown, sourcePath: string): ParsedCloudStorageDocument {
+  if (isRecord(parsed)) {
+    const document = createCloudStorageDocument();
+    const keyOrder: string[] = [];
+
+    for (const [key, value] of Object.entries(parsed)) {
+      assertSafeDocumentKey(key, sourcePath);
+      document[key] = value;
+      keyOrder.push(key);
     }
 
-    return parsed;
+    return {
+      document,
+      format: 'object',
+      keyOrder
+    };
   }
+
+  if (Array.isArray(parsed)) {
+    const document = createCloudStorageDocument();
+    const keyOrder: string[] = [];
+    const seenKeys = new Set<string>();
+
+    for (const entry of parsed) {
+      if (!Array.isArray(entry) || entry.length < 2 || typeof entry[0] !== 'string') {
+        throw new Error(`Collection backend file ${sourcePath} contains an unsupported array entry shape.`);
+      }
+
+      const [key, value] = entry;
+      assertSafeDocumentKey(key, sourcePath);
+      document[key] = value;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        keyOrder.push(key);
+      }
+    }
+
+    return {
+      document,
+      format: 'pair-array',
+      keyOrder
+    };
+  }
+
+  throw new Error(`Collection backend file ${sourcePath} is not a supported JSON document.`);
+}
+
+function serializeDocument(document: CloudStorageDocument, format: CloudStorageDocumentFormat, keyOrder: string[]): string {
+  if (format === 'object') {
+    return `${JSON.stringify(document, null, 2)}\n`;
+  }
+
+  const seen = new Set<string>();
+  const entries: Array<[string, unknown]> = [];
+
+  for (const key of keyOrder) {
+    if (Object.hasOwn(document, key)) {
+      entries.push([key, wrapPairArrayValue(key, document[key])]);
+      seen.add(key);
+    }
+  }
+
+  for (const key of Object.keys(document)) {
+    if (!seen.has(key)) {
+      entries.push([key, wrapPairArrayValue(key, document[key])]);
+    }
+  }
+
+  return `${JSON.stringify(entries, null, 2)}\n`;
+}
+
+function createCloudStorageDocument(): CloudStorageDocument {
+  return Object.create(null) as CloudStorageDocument;
+}
+
+function assertSafeDocumentKey(key: string, sourcePath: string): void {
+  if (RESERVED_DOCUMENT_KEYS.has(key)) {
+    throw new Error(`Collection backend file ${sourcePath} contains reserved key ${key}.`);
+  }
+}
+
+function isWrappedCloudStorageEntry(value: unknown): value is Record<string, unknown> & { key: string } {
+  return isRecord(value)
+    && typeof value.key === 'string'
+    && ('value' in value || 'timestamp' in value || 'version' in value || 'is_deleted' in value);
+}
+
+function unwrapCollectionValue(value: unknown): unknown {
+  if (!isWrappedCloudStorageEntry(value)) {
+    return value;
+  }
+
+  if (toBoolean(value.is_deleted) === true && !('value' in value)) {
+    return undefined;
+  }
+
+  const payload = value.value;
+  if (typeof payload === 'string') {
+    try {
+      return parseJson(payload);
+    } catch {
+      return payload;
+    }
+  }
+
+  return payload;
+}
+
+function wrapPairArrayValue(key: string, value: unknown): unknown {
+  if (isWrappedCloudStorageEntry(value)) {
+    return value;
+  }
+
+  if (!key.startsWith('user-collections.')) {
+    return value;
+  }
+
+  const payload = buildPairArrayPayload(key, value);
+
+  return {
+    key,
+    timestamp: Math.floor(Date.now() / 1000),
+    value: JSON.stringify(payload),
+    version: '1'
+  };
+}
+
+function buildPairArrayPayload(key: string, value: unknown): unknown {
+  if (key === 'user-collections.favorite') {
+    return {
+      id: 'favorite',
+      name: 'Favorites',
+      added: serializeMembershipArray(uniqueStrings(membershipFromValue(value)), true),
+      removed: []
+    };
+  }
+
+  if (key === 'user-collections.hidden') {
+    return {
+      id: 'hidden',
+      name: 'Hidden',
+      added: serializeMembershipArray(uniqueStrings(membershipFromValue(value)), true),
+      removed: []
+    };
+  }
+
+  if (key.startsWith('user-collections.uc-')) {
+    const collectionName = readCollectionName(key, value);
+    return {
+      id: key.replace('user-collections.', ''),
+      name: collectionName,
+      added: serializeMembershipArray(uniqueStrings(membershipFromValue(value)), true),
+      removed: []
+    };
+  }
+
+  return value;
 }
 
 function buildSnapshot(
@@ -120,20 +284,31 @@ function buildSnapshot(
 }
 
 function membershipFromValue(value: unknown): Set<string> {
-  if (Array.isArray(value)) {
-    return new Set(value.flatMap((entry) => (typeof entry === 'number' || typeof entry === 'string') ? [String(entry)] : []));
+  const normalizedValue = unwrapCollectionValue(value);
+
+  if (Array.isArray(normalizedValue)) {
+    return new Set(normalizedValue.flatMap((entry) => (typeof entry === 'number' || typeof entry === 'string') ? [String(entry)] : []));
   }
 
-  if (isRecord(value)) {
+  if (isRecord(normalizedValue)) {
+    if ('added' in normalizedValue || 'removed' in normalizedValue) {
+      const result = membershipFromValue(normalizedValue.added);
+      for (const appId of membershipFromValue(normalizedValue.removed)) {
+        result.delete(appId);
+      }
+
+      return result;
+    }
+
     const nestedContainers = ['apps', 'appids', 'items', 'entries'];
     for (const key of nestedContainers) {
-      if (key in value) {
-        return membershipFromValue(value[key]);
+      if (key in normalizedValue) {
+        return membershipFromValue(normalizedValue[key]);
       }
     }
 
     const result = new Set<string>();
-    for (const [key, entry] of Object.entries(value)) {
+    for (const [key, entry] of Object.entries(normalizedValue)) {
       if (/^\d+$/.test(key) && toBoolean(entry) !== false) {
         result.add(key);
       }
@@ -146,13 +321,14 @@ function membershipFromValue(value: unknown): Set<string> {
 }
 
 function readCollectionName(key: string, value: unknown): string {
-  if (isRecord(value)) {
-    if (typeof value.name === 'string' && value.name.trim() !== '') {
-      return value.name;
+  const normalizedValue = unwrapCollectionValue(value);
+  if (isRecord(normalizedValue)) {
+    if (typeof normalizedValue.name === 'string' && normalizedValue.name.trim() !== '') {
+      return normalizedValue.name;
     }
 
-    if (typeof value.title === 'string' && value.title.trim() !== '') {
-      return value.title;
+    if (typeof normalizedValue.title === 'string' && normalizedValue.title.trim() !== '') {
+      return normalizedValue.title;
     }
   }
 
@@ -233,35 +409,49 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
 
 function rewriteMembershipValue(original: unknown, members: Set<string>): unknown {
   const sortedMembers = uniqueStrings(members);
+  const normalizedOriginal = unwrapCollectionValue(original);
 
-  if (Array.isArray(original)) {
+  if (isWrappedCloudStorageEntry(original)) {
+    const nextPayload = rewriteMembershipPayload(normalizedOriginal, sortedMembers);
+    const { is_deleted, ...rest } = original;
+    return {
+      ...rest,
+      value: JSON.stringify(nextPayload)
+    };
+  }
+
+  if (Array.isArray(normalizedOriginal)) {
     return sortedMembers;
   }
 
-  if (isRecord(original)) {
-    const numericKeys = Object.keys(original).filter((key) => /^\d+$/.test(key));
+  if (isRecord(normalizedOriginal)) {
+    const numericKeys = Object.keys(normalizedOriginal).filter((key) => /^\d+$/.test(key));
     if (numericKeys.length > 0) {
       const result: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(original)) {
+      for (const [key, value] of Object.entries(normalizedOriginal)) {
         if (!/^\d+$/.test(key)) {
           result[key] = value;
         }
       }
 
       for (const member of sortedMembers) {
-        result[member] = member in original ? original[member] : true;
+        result[member] = member in normalizedOriginal ? normalizedOriginal[member] : true;
       }
 
       return result;
     }
 
     for (const nestedKey of ['apps', 'appids', 'items', 'entries']) {
-      if (nestedKey in original) {
+      if (nestedKey in normalizedOriginal) {
         return {
-          ...original,
-          [nestedKey]: rewriteMembershipValue(original[nestedKey], members)
+          ...normalizedOriginal,
+          [nestedKey]: rewriteMembershipValue(normalizedOriginal[nestedKey], members)
         };
       }
+    }
+
+    if ('added' in normalizedOriginal || 'removed' in normalizedOriginal) {
+      return rewriteMembershipPayload(normalizedOriginal, sortedMembers);
     }
   }
 
@@ -270,26 +460,40 @@ function rewriteMembershipValue(original: unknown, members: Set<string>): unknow
 
 function rewriteNamedCollectionValue(original: unknown, collectionName: string, members: Set<string>): unknown {
   const sortedMembers = uniqueStrings(members);
+  const normalizedOriginal = unwrapCollectionValue(original);
 
-  if (isRecord(original)) {
+  if (isWrappedCloudStorageEntry(original)) {
+    const nextPayload = rewriteNamedCollectionPayload(normalizedOriginal, collectionName, sortedMembers, original.key);
+    const { is_deleted, ...rest } = original;
+    return {
+      ...rest,
+      value: JSON.stringify(nextPayload)
+    };
+  }
+
+  if (isRecord(normalizedOriginal)) {
     for (const nestedKey of ['apps', 'appids', 'items', 'entries']) {
-      if (nestedKey in original) {
+      if (nestedKey in normalizedOriginal) {
         return {
-          ...original,
-          name: typeof original.name === 'string' ? original.name : collectionName,
-          [nestedKey]: rewriteMembershipValue(original[nestedKey], members)
+          ...normalizedOriginal,
+          name: typeof normalizedOriginal.name === 'string' ? normalizedOriginal.name : collectionName,
+          [nestedKey]: rewriteMembershipValue(normalizedOriginal[nestedKey], members)
         };
       }
     }
 
-    const numericKeys = Object.keys(original).filter((key) => /^\d+$/.test(key));
+    const numericKeys = Object.keys(normalizedOriginal).filter((key) => /^\d+$/.test(key));
     if (numericKeys.length > 0) {
-      return rewriteMembershipValue({ ...original, name: original.name ?? collectionName }, members);
+      return rewriteMembershipValue({ ...normalizedOriginal, name: normalizedOriginal.name ?? collectionName }, members);
+    }
+
+    if ('added' in normalizedOriginal || 'removed' in normalizedOriginal) {
+      return rewriteNamedCollectionPayload(normalizedOriginal, collectionName, sortedMembers);
     }
 
     return {
-      ...original,
-      name: typeof original.name === 'string' ? original.name : collectionName,
+      ...normalizedOriginal,
+      name: typeof normalizedOriginal.name === 'string' ? normalizedOriginal.name : collectionName,
       apps: sortedMembers
     };
   }
@@ -300,9 +504,59 @@ function rewriteNamedCollectionValue(original: unknown, collectionName: string, 
   };
 }
 
+function rewriteMembershipPayload(original: unknown, sortedMembers: string[]): unknown {
+  if (isRecord(original) && ('added' in original || 'removed' in original)) {
+    return {
+      ...original,
+      added: serializeMembershipArray(sortedMembers, true),
+      removed: []
+    };
+  }
+
+  return rewriteMembershipValue(original, new Set(sortedMembers));
+}
+
+function rewriteNamedCollectionPayload(
+  original: unknown,
+  collectionName: string,
+  sortedMembers: string[],
+  wrapperKey?: string
+): unknown {
+  if (isRecord(original) && ('added' in original || 'removed' in original)) {
+    const derivedId = typeof original.id === 'string'
+      ? original.id
+      : wrapperKey?.replace('user-collections.', '') ?? `uc-${slugify(collectionName)}`;
+
+    return {
+      ...original,
+      id: derivedId,
+      name: typeof original.name === 'string' ? original.name : collectionName,
+      added: serializeMembershipArray(sortedMembers, true),
+      removed: []
+    };
+  }
+
+  return {
+    id: wrapperKey?.replace('user-collections.', '') ?? `uc-${slugify(collectionName)}`,
+    name: collectionName,
+    added: serializeMembershipArray(sortedMembers, true),
+    removed: []
+  };
+}
+
+function serializeMembershipArray(sortedMembers: string[], preferNumeric = false): Array<string | number> {
+  if (preferNumeric && sortedMembers.every((member) => /^\d+$/.test(member))) {
+    return sortedMembers.map((member) => Number(member));
+  }
+
+  return sortedMembers;
+}
+
 export const cloudStorageJsonInternals = {
   buildSnapshot,
   membershipFromValue,
+  normalizeDocument,
+  serializeDocument,
   updateDocument,
   stableStringify
 };
