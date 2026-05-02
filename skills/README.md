@@ -17,16 +17,16 @@ skills/
 ## What these skills do
 
 - **`steam-library-curator`**
-  - read-heavy library analysis
-  - deterministic recommendations
-  - store enrichment, export, and `steam://` link workflows
+  - library-first analysis of the owned Steam library
+  - deterministic recommendations from owned games, with optional store enrichment/comparison when useful
+  - export and `steam://` link workflows
 
 - **`steam-collection-planner`**
   - plan-first collection and hidden-state workflows with read-only or ignored group protection
   - explicitly separates preview planning from Steam-owned mutation
 
 - **`steam-deck-backlog-triage`**
-  - Steam Deck backlog filtering and deterministic shortlist generation
+  - Steam Deck backlog filtering and deterministic shortlist generation from the owned library
 
 These skills are designed to sit on top of the MCP prompts already implemented in this repo:
 

@@ -5,11 +5,11 @@ description: "Use when the user wants to triage their Steam backlog for Steam De
 
 # Steam Deck Backlog Triage
 
-Use this skill for Steam Deck-focused backlog analysis built on top of the Steam MCP prompt `steam_deck_backlog_triage`.
+Use this skill for Steam Deck-focused backlog analysis of the owned library built on top of the Steam MCP prompt `steam_deck_backlog_triage`.
 
 ## When to Use
 
-- The user wants to shortlist backlog games for Steam Deck.
+- The user wants to shortlist owned backlog games for Steam Deck.
 - The user wants Verified/Playable filtering.
 - The user wants deterministic ranking based on favorites, collections, genres, tags, and play patterns.
 
@@ -24,6 +24,7 @@ Use this skill for Steam Deck-focused backlog analysis built on top of the Steam
 ## Safety Rules
 
 - This workflow is read-only by default.
+- Keep the workflow focused on the owned backlog rather than general Steam store discovery.
 - Keep reasoning explicit and deterministic: Deck status, genres, tags, collections, favorites, hidden flags, and playtime.
 - Do not escalate to collection mutation unless the user separately asks for collection reorganization.
 
@@ -41,3 +42,4 @@ steam_link_generate
 
 - Use `verified` as the default Deck filter unless the user asks for broader `playable` results.
 - If the user also wants category changes for the shortlist, switch to the `steam-collection-planner` skill after triage.
+- If the user wants to browse the wider Steam store rather than triage the owned backlog, switch to the `steam-library-curator` workflow instead.
