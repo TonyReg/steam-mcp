@@ -1,8 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SteamMcpContext } from '../context.js';
+import { registerToolShallow } from '../mcp/register-tool-shallow.js';
 
 export function registerSteamStatusTool(server: McpServer, context: SteamMcpContext): void {
-  server.registerTool(
+  registerToolShallow(
+    server,
     'steam_status',
     {
       title: 'Steam status',
