@@ -18,7 +18,7 @@ packages/
   steam-mcp/    # thin MCP stdio server using @modelcontextprotocol/sdk
 test/
 fixtures/
-docs/design/
+docs/
 ```
 
 ## Locked v1 behavior
@@ -62,6 +62,8 @@ These prompts are the v1 agent-facing workflow surface. They guide clients towar
 - `STEAM_USERDATA_DIR`
 - `STEAM_MCP_STATE_DIR`
 - `STEAM_ENABLE_COLLECTION_WRITES` (`0` by default)
+- `STEAM_DEFAULT_READ_ONLY_GROUPS` (JSON array of collection names to preserve during planning/apply)
+- `STEAM_DEFAULT_IGNORE_GROUPS` (JSON array of collection names excluded from similarity/search/list filtering when the tool opts in)
 
 Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 
@@ -93,5 +95,4 @@ npm test
 
 ## Docs
 
-- `docs/design/windows-first-steam-mcp-v1.md`
 - `docs/prompts/steam-mcp-agent-prompts.md`
