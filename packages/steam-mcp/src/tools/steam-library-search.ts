@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SteamMcpContext } from '../context.js';
+import { registerToolShallow } from '../mcp/register-tool-shallow.js';
 import { deckStatusSchema } from '../schemas/index.js';
 
 const steamLibrarySearchInputShape = {
@@ -17,7 +18,8 @@ const steamLibrarySearchArgsSchema = z.object(steamLibrarySearchInputShape);
 const steamLibrarySearchInputSchema: Record<string, z.ZodTypeAny> = steamLibrarySearchInputShape;
 
 export function registerSteamLibrarySearchTool(server: McpServer, context: SteamMcpContext): void {
-  server.registerTool(
+  registerToolShallow(
+    server,
     'steam_library_search',
     {
       title: 'Steam library search',
