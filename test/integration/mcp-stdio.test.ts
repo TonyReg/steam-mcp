@@ -95,41 +95,67 @@ test('stdio server applies env-configured default protected groups', async () =>
 
   await client.connect(transport);
 
-  const planResult = await client.callTool({
-    name: 'steam_collection_plan',
-    arguments: {
-      mode: 'merge',
-      rules: [
-        {
-          appIds: [620],
-          setCollections: ['Co-op']
-        }
-      ]
-    }
-  });
-  const planPayload = parseFirstTextContent(planResult) as {
-    plan: {
-      policies: {
-        readOnlyGroups: string[];
-        ignoreGroups: string[];
+  try {
+    const planResult = await client.callTool({
+      name: 'steam_collection_plan',
+      arguments: {
+        mode: 'merge',
+        rules: [
+          {
+            appIds: [620],
+            setCollections: ['Co-op']
+          }
+        ]
+      }
+    });
+    const planPayload = parseFirstTextContent(planResult) as {
+      plan: {
+        policies: {
+          readOnlyGroups: string[];
+          ignoreGroups: string[];
+        };
       };
     };
-  };
-  assert.deepEqual(planPayload.plan.policies, {
-    readOnlyGroups: ['Puzzle'],
-    ignoreGroups: ['Puzzle']
-  });
+    assert.deepEqual(planPayload.plan.policies, {
+      readOnlyGroups: ['Puzzle'],
+      ignoreGroups: ['Puzzle']
+    });
 
-  const similarResult = await client.callTool({
-    name: 'steam_find_similar',
-    arguments: {
-      query: 'portal 2',
-      scope: 'library',
-      limit: 10
-    }
-  });
-  const similarPayload = parseFirstTextContent(similarResult) as unknown[];
-  assert.deepEqual(similarPayload, []);
+    const similarResult = await client.callTool({
+      name: 'steam_find_similar',
+      arguments: {
+        query: 'portal 2',
+        scope: 'library',
+        limit: 10
+      }
+    });
+    const similarPayload = parseFirstTextContent(similarResult) as unknown[];
+    assert.deepEqual(similarPayload, []);
 
-  await client.close();
+    const searchResult = await client.callTool({
+      name: 'steam_library_search',
+      arguments: {
+        query: 'portal',
+        limit: 10
+      }
+    });
+    const searchPayload = parseFirstTextContent(searchResult) as unknown[];
+    assert.deepEqual(searchPayload, []);
+
+    const listResult = await client.callTool({
+      name: 'steam_library_list',
+      arguments: {
+        limit: 10
+      }
+    });
+    const listPayload = parseFirstTextContent(listResult) as {
+      games: Array<{ appId: number }>;
+      summary: { total: number; returned: number };
+    };
+    assert.deepEqual(listPayload.games.map((game) => game.appId).sort((left, right) => left - right), [440, 570]);
+    assert.equal(listPayload.summary.total, 3);
+    assert.equal(listPayload.summary.returned, 2);
+  } finally {
+    await client.close();
+  }
 });
