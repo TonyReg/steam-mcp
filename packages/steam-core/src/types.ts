@@ -32,11 +32,15 @@ export interface GameRecord {
 
 export interface CollectionPlanAppOperation {
   appId: number;
-  favorite?: boolean;
   hidden?: boolean;
   collectionsToAdd?: string[];
   collectionsToRemove?: string[];
   collectionsSet?: string[];
+}
+
+export interface CollectionPlanPolicies {
+  readOnlyGroups: string[];
+  ignoreGroups: string[];
 }
 
 export interface CollectionPlan {
@@ -47,6 +51,7 @@ export interface CollectionPlan {
   snapshotHash: string;
   mode: PlanMode;
   operations: Record<string, CollectionPlanAppOperation>;
+  policies: CollectionPlanPolicies;
   warnings: string[];
   sourceRequest?: string;
   planPath: string;
@@ -62,6 +67,7 @@ export interface CollectionSnapshot {
   hiddenByApp: Record<string, boolean>;
   rawMetadata: {
     backendKeyMap: Record<string, string>;
+    displayNameMap: Record<string, string>;
   };
 }
 
@@ -72,7 +78,6 @@ export interface CollectionRule {
   addToCollections?: string[];
   removeFromCollections?: string[];
   setCollections?: string[];
-  favorite?: boolean;
   hidden?: boolean;
 }
 
@@ -80,6 +85,8 @@ export interface CollectionPlanRequest {
   mode?: PlanMode;
   request?: string;
   rules?: CollectionRule[];
+  readOnlyGroups?: string[];
+  ignoreGroups?: string[];
 }
 
 export interface CollectionPlanPreview {
@@ -165,6 +172,7 @@ export interface SimilarRequest {
   scope?: 'library' | 'store' | 'both';
   deckStatuses?: DeckStatus[];
   limit?: number;
+  ignoreGroups?: string[];
 }
 
 export interface ExportResult {

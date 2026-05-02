@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import type { CollectionPlan, CollectionSnapshot } from '../../../types.js';
-import { appIdString, hashValue, isRecord, normalizeAbsolutePath, parseJson, slugify, stableStringify, toBoolean, uniqueStrings } from '../../../utils.js';
+import { appIdString, hashValue, isRecord, normalizeAbsolutePath, normalizeCollectionName, parseJson, slugify, stableStringify, toBoolean, toCollectionNameSet, uniqueCollectionNames, uniqueStrings } from '../../../utils.js';
 import type { CollectionBackendAdapter, CollectionBackendApplyDraft } from '../../types.js';
 
 type CloudStorageDocument = Record<string, unknown>;
@@ -241,6 +241,7 @@ function buildSnapshot(
   const hidden = membershipFromValue(document['user-collections.hidden']);
   const collectionsByApp = new Map<string, Set<string>>();
   const backendKeyMap: Record<string, string> = {};
+  const displayNameMap: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(document)) {
     if (!key.startsWith('user-collections.uc-')) {
@@ -248,7 +249,16 @@ function buildSnapshot(
     }
 
     const collectionName = readCollectionName(key, value);
-    backendKeyMap[collectionName] = key;
+    const canonicalCollectionName = normalizeCollectionName(collectionName);
+    const existingDisplayName = displayNameMap[canonicalCollectionName];
+    if (existingDisplayName && existingDisplayName !== collectionName) {
+      throw new Error(
+        `Collection backend file ${sourcePath} contains ambiguous collection names ${existingDisplayName} and ${collectionName}.`
+      );
+    }
+
+    backendKeyMap[canonicalCollectionName] = key;
+    displayNameMap[canonicalCollectionName] = collectionName;
 
     for (const appId of membershipFromValue(value)) {
       const current = collectionsByApp.get(appId) ?? new Set<string>();
@@ -258,7 +268,7 @@ function buildSnapshot(
   }
 
   const normalizedCollectionsByApp = Object.fromEntries(
-    [...collectionsByApp.entries()].map(([appId, collections]) => [appId, uniqueStrings(collections)])
+    [...collectionsByApp.entries()].map(([appId, collections]) => [appId, uniqueCollectionNames(collections)])
   );
   const favoritesByApp = Object.fromEntries([...favorites].map((appId) => [appId, true]));
   const hiddenByApp = Object.fromEntries([...hidden].map((appId) => [appId, true]));
@@ -278,7 +288,8 @@ function buildSnapshot(
     favoritesByApp,
     hiddenByApp,
     rawMetadata: {
-      backendKeyMap
+      backendKeyMap,
+      displayNameMap
     }
   };
 }
@@ -338,9 +349,12 @@ function readCollectionName(key: string, value: unknown): string {
 function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, snapshot: CollectionSnapshot): CloudStorageDocument {
   const nextDocument = structuredClone(document);
 
-  const favorites = new Set<string>(Object.keys(snapshot.favoritesByApp).filter((appId) => snapshot.favoritesByApp[appId]));
   const hidden = new Set<string>(Object.keys(snapshot.hiddenByApp).filter((appId) => snapshot.hiddenByApp[appId]));
   const collections = new Map<string, Set<string>>();
+  const protectedGroups = new Set<string>([
+    ...toCollectionNameSet(plan.policies.readOnlyGroups),
+    ...toCollectionNameSet(plan.policies.ignoreGroups)
+  ]);
 
   for (const [appId, collectionNames] of Object.entries(snapshot.collectionsByApp)) {
     collections.set(appId, new Set(collectionNames));
@@ -349,14 +363,7 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
   for (const operation of Object.values(plan.operations)) {
     const appId = appIdString(operation.appId);
     const currentCollections = collections.get(appId) ?? new Set<string>();
-
-    if (operation.favorite !== undefined) {
-      if (operation.favorite) {
-        favorites.add(appId);
-      } else {
-        favorites.delete(appId);
-      }
-    }
+    const protectedMemberships = getProtectedMemberships(currentCollections, protectedGroups);
 
     if (operation.hidden !== undefined) {
       if (operation.hidden) {
@@ -369,25 +376,40 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
     if (operation.collectionsSet) {
       currentCollections.clear();
       for (const collectionName of operation.collectionsSet) {
-        currentCollections.add(collectionName);
+        if (protectedGroups.has(normalizeCollectionName(collectionName))) {
+          continue;
+        }
+
+        currentCollections.add(resolveSnapshotCollectionName(collectionName, snapshot));
       }
+
+      rehydrateProtectedMemberships(currentCollections, protectedMemberships);
     }
 
     for (const collectionName of operation.collectionsToAdd ?? []) {
-      currentCollections.add(collectionName);
+      if (protectedGroups.has(normalizeCollectionName(collectionName))) {
+        continue;
+      }
+
+      currentCollections.add(resolveSnapshotCollectionName(collectionName, snapshot));
     }
 
     for (const collectionName of operation.collectionsToRemove ?? []) {
-      currentCollections.delete(collectionName);
+      if (protectedGroups.has(normalizeCollectionName(collectionName))) {
+        continue;
+      }
+
+      deleteCollectionByCanonicalName(currentCollections, collectionName);
     }
+
+    rehydrateProtectedMemberships(currentCollections, protectedMemberships);
 
     collections.set(appId, currentCollections);
   }
 
-  nextDocument['user-collections.favorite'] = rewriteMembershipValue(nextDocument['user-collections.favorite'], favorites);
   nextDocument['user-collections.hidden'] = rewriteMembershipValue(nextDocument['user-collections.hidden'], hidden);
 
-  const collectionNames = uniqueStrings(new Set([...Object.values(snapshot.collectionsByApp).flat(), ...[...collections.values()].flatMap((set) => [...set]) ]));
+  const collectionNames = uniqueCollectionNames(new Set([...Object.values(snapshot.collectionsByApp).flat(), ...[...collections.values()].flatMap((set) => [...set]) ]));
   const appsByCollection = new Map<string, Set<string>>();
 
   for (const [appId, collectionSet] of collections.entries()) {
@@ -399,12 +421,44 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
   }
 
   for (const collectionName of collectionNames) {
-    const backendKey = snapshot.rawMetadata.backendKeyMap[collectionName] ?? `user-collections.uc-${slugify(collectionName)}`;
+    const backendKey = resolveBackendKey(collectionName, snapshot);
     const existingValue = nextDocument[backendKey];
     nextDocument[backendKey] = rewriteNamedCollectionValue(existingValue, collectionName, appsByCollection.get(collectionName) ?? new Set<string>());
   }
 
   return nextDocument;
+}
+
+function resolveSnapshotCollectionName(collectionName: string, snapshot: CollectionSnapshot): string {
+  return snapshot.rawMetadata.displayNameMap[normalizeCollectionName(collectionName)] ?? collectionName.trim();
+}
+
+function resolveBackendKey(collectionName: string, snapshot: CollectionSnapshot): string {
+  return snapshot.rawMetadata.backendKeyMap[normalizeCollectionName(collectionName)] ?? `user-collections.uc-${slugify(collectionName)}`;
+}
+
+function getProtectedMemberships(currentCollections: Set<string>, protectedGroups: Set<string>): string[] {
+  if (protectedGroups.size === 0) {
+    return [];
+  }
+
+  return [...currentCollections].filter((collectionName) => protectedGroups.has(normalizeCollectionName(collectionName)));
+}
+
+function rehydrateProtectedMemberships(currentCollections: Set<string>, protectedMemberships: string[]): void {
+  for (const collectionName of protectedMemberships) {
+    currentCollections.add(collectionName);
+  }
+}
+
+function deleteCollectionByCanonicalName(currentCollections: Set<string>, collectionName: string): void {
+  const normalizedCollectionName = normalizeCollectionName(collectionName);
+  for (const existingCollectionName of currentCollections) {
+    if (normalizeCollectionName(existingCollectionName) === normalizedCollectionName) {
+      currentCollections.delete(existingCollectionName);
+      return;
+    }
+  }
 }
 
 function rewriteMembershipValue(original: unknown, members: Set<string>): unknown {

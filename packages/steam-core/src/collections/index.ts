@@ -8,13 +8,14 @@ import type {
   CollectionApplyOptions,
   CollectionApplyResult,
   CollectionPlan,
+  CollectionPlanPolicies,
   CollectionPlanPreview,
   CollectionPlanRequest,
   CollectionRule,
   GameRecord,
   PlanMode
 } from '../types.js';
-import { appIdString, ensurePathInsideRoot, normalizeUuid, nowIso, uniqueStrings } from '../utils.js';
+import { appIdString, ensurePathInsideRoot, normalizeCollectionName, normalizeUuid, nowIso, toCollectionNameSet, uniqueCollectionNames, uniqueStrings } from '../utils.js';
 import type { SteamDiscoveryService } from '../discovery/index.js';
 import type { SafetyService } from '../safety/index.js';
 import type { CollectionBackendRegistry } from './backend-registry/index.js';
@@ -49,6 +50,7 @@ export class CollectionService {
       this.libraryService.list({ includeStoreMetadata: false, includeDeckStatus: false, limit: 5000 })
     ]);
 
+    const policies = normalizePolicies(request);
     const rules = normalizeRules(request);
     const warnings = [...snapshot.sourcePath ? [] : ['Collection source path is missing.']];
     const operations: CollectionPlan['operations'] = {};
@@ -60,13 +62,13 @@ export class CollectionService {
         matchedGames.push(game);
         const key = appIdString(game.appId);
         const current = operations[key] ?? { appId: game.appId };
-        const next = applyRuleToOperation(current, rule, request.mode ?? 'add-only', warnings);
+        const next = applyRuleToOperation(current, rule, request.mode ?? 'add-only', policies, warnings);
         operations[key] = next;
       }
     }
 
     const destructive = (request.mode ?? 'add-only') === 'replace'
-      || Object.values(operations).some((operation) => (operation.collectionsToRemove?.length ?? 0) > 0 || operation.favorite === false || operation.hidden === false);
+      || Object.values(operations).some((operation) => (operation.collectionsToRemove?.length ?? 0) > 0 || operation.hidden === false);
     if (destructive) {
       warnings.push('Plan contains destructive changes. Review carefully before apply.');
     }
@@ -81,6 +83,7 @@ export class CollectionService {
       snapshotHash: snapshot.snapshotHash,
       mode: request.mode ?? 'add-only',
       operations,
+      policies,
       warnings: uniqueStrings(warnings),
       sourceRequest: request.request,
       planPath: this.resolvePlanPath(planId, directories.plansDir)
@@ -122,7 +125,8 @@ export class CollectionService {
     }
 
     const planPath = this.resolvePlanPath(normalizedPlanId, config.stateDirectories.plansDir);
-    const plan = JSON.parse(await readFile(planPath, 'utf8')) as CollectionPlan;
+    const persistedPlan = JSON.parse(await readFile(planPath, 'utf8')) as CollectionPlan;
+    const plan = normalizePersistedPlan(persistedPlan);
     const snapshot = await backend.readSnapshot();
     const validationWarnings = backend.validatePlan(plan, snapshot);
     if (validationWarnings.length > 0) {
@@ -201,24 +205,51 @@ function normalizeRules(request: CollectionPlanRequest): CollectionRule[] {
   throw new Error('Collection planning requires either explicit rules or a non-empty request string.');
 }
 
+function normalizePolicies(request: Pick<CollectionPlanRequest, 'readOnlyGroups' | 'ignoreGroups'>): CollectionPlanPolicies {
+  return {
+    readOnlyGroups: uniqueCollectionNames(request.readOnlyGroups ?? []),
+    ignoreGroups: uniqueCollectionNames(request.ignoreGroups ?? [])
+  };
+}
+
+function normalizePersistedPlan(plan: CollectionPlan): CollectionPlan {
+  return {
+    ...plan,
+    policies: normalizePolicies(plan.policies ?? { readOnlyGroups: [], ignoreGroups: [] })
+  };
+}
+
 function applyRuleToOperation(
   operation: CollectionPlan['operations'][string],
   rule: CollectionRule,
   mode: PlanMode,
+  policies: CollectionPlanPolicies,
   warnings: string[]
 ): CollectionPlan['operations'][string] {
-  const collectionsToAdd = uniqueStrings([...(operation.collectionsToAdd ?? []), ...(rule.collection ? [rule.collection] : []), ...(rule.addToCollections ?? [])]);
-  let nextFavorite = rule.favorite ?? operation.favorite;
+  const protectedGroups = new Set<string>([
+    ...toCollectionNameSet(policies.readOnlyGroups),
+    ...toCollectionNameSet(policies.ignoreGroups)
+  ]);
+  const collectionsToAdd = applyProtectedCollectionFilter(
+    uniqueCollectionNames([...(operation.collectionsToAdd ?? []), ...(rule.collection ? [rule.collection] : []), ...(rule.addToCollections ?? [])]),
+    protectedGroups,
+    operation.appId,
+    'add',
+    warnings
+  );
   let nextHidden = rule.hidden ?? operation.hidden;
-  let nextCollectionsToRemove = uniqueStrings([...(operation.collectionsToRemove ?? []), ...(rule.removeFromCollections ?? [])]);
-  let nextCollectionsSet = rule.setCollections ? uniqueStrings(rule.setCollections) : operation.collectionsSet;
+  let nextCollectionsToRemove = applyProtectedCollectionFilter(
+    uniqueCollectionNames([...(operation.collectionsToRemove ?? []), ...(rule.removeFromCollections ?? [])]),
+    protectedGroups,
+    operation.appId,
+    'remove',
+    warnings
+  );
+  let nextCollectionsSet = rule.setCollections
+    ? applyProtectedCollectionFilter(uniqueCollectionNames(rule.setCollections), protectedGroups, operation.appId, 'set', warnings)
+    : operation.collectionsSet;
 
   if (mode === 'add-only') {
-    if (nextFavorite === false) {
-      warnings.push(`Ignoring favorite=false for app ${operation.appId} in add-only mode.`);
-      nextFavorite = undefined;
-    }
-
     if (nextHidden === false) {
       warnings.push(`Ignoring hidden=false for app ${operation.appId} in add-only mode.`);
       nextHidden = undefined;
@@ -233,12 +264,32 @@ function applyRuleToOperation(
 
   return {
     appId: operation.appId,
-    ...(nextFavorite !== undefined ? { favorite: nextFavorite } : {}),
     ...(nextHidden !== undefined ? { hidden: nextHidden } : {}),
     ...(collectionsToAdd.length > 0 ? { collectionsToAdd } : {}),
     ...(nextCollectionsToRemove.length > 0 ? { collectionsToRemove: nextCollectionsToRemove } : {}),
     ...(nextCollectionsSet !== undefined ? { collectionsSet: nextCollectionsSet } : {})
   };
+}
+
+function applyProtectedCollectionFilter(
+  collectionNames: string[],
+  protectedGroups: Set<string>,
+  appId: number,
+  action: 'add' | 'remove' | 'set',
+  warnings: string[]
+): string[] {
+  if (protectedGroups.size === 0) {
+    return collectionNames;
+  }
+
+  return collectionNames.filter((collectionName) => {
+    if (!protectedGroups.has(normalizeCollectionName(collectionName))) {
+      return true;
+    }
+
+    warnings.push(`Ignoring protected group ${collectionName} for app ${appId} during ${action}.`);
+    return false;
+  });
 }
 
 function uniqueGames(games: GameRecord[]): GameRecord[] {

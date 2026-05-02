@@ -98,6 +98,41 @@ export function uniqueStrings(values: Iterable<string>): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
+export function normalizeCollectionName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function toCollectionNameSet(values: Iterable<string> | undefined): Set<string> {
+  const result = new Set<string>();
+
+  for (const value of values ?? []) {
+    const normalized = normalizeCollectionName(value);
+    if (normalized !== '') {
+      result.add(normalized);
+    }
+  }
+
+  return result;
+}
+
+export function uniqueCollectionNames(values: Iterable<string>): string[] {
+  const byCanonical = new Map<string, string>();
+
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (trimmed === '') {
+      continue;
+    }
+
+    const canonical = normalizeCollectionName(trimmed);
+    if (!byCanonical.has(canonical)) {
+      byCanonical.set(canonical, trimmed);
+    }
+  }
+
+  return [...byCanonical.values()].sort((left, right) => left.localeCompare(right));
+}
+
 export function normalizeWhitespace(value: string): string {
   return value.trim().replace(/\s+/g, ' ');
 }

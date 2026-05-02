@@ -18,7 +18,7 @@ import {
 import { readPairArrayDocument, readPairArrayPayload, rewriteCloudstorageAsPairArray } from '../support/cloudstorage-shape.js';
 import { materializeSteamFixture } from '../support/fixture-steam.js';
 
-test('collection service writes backup-first and preserves unrelated JSON fields', async () => {
+test('collection service writes backup-first, keeps favorites read-only, and preserves read-only groups', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot, true);
   const configService = new ConfigService(fixture.env);
@@ -44,11 +44,11 @@ test('collection service writes backup-first and preserves unrelated JSON fields
 
   const preview = await collectionService.createPlan({
     mode: 'merge',
+    readOnlyGroups: [' puzzle '],
     rules: [
       {
         appIds: [620],
-        addToCollections: ['Co-op'],
-        favorite: true
+        setCollections: ['Co-op']
       }
     ]
   });
@@ -59,12 +59,19 @@ test('collection service writes backup-first and preserves unrelated JSON fields
 
   const updated = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>;
   assert.equal((updated['unrelated-section'] as { preserve: boolean }).preserve, true);
+  assert.deepEqual(updated['user-collections.favorite'], ['620']);
+
+  const puzzle = updated['user-collections.uc-puzzle'] as { apps: string[]; name: string; description: string };
+  assert.equal(puzzle.name, 'Puzzle');
+  assert.deepEqual(puzzle.apps, ['620']);
+  assert.equal(puzzle.description, 'Preserve me');
+
   const coop = updated['user-collections.uc-co-op'] as { apps: string[]; name: string };
   assert.equal(coop.name, 'Co-op');
   assert.deepEqual(coop.apps, ['620']);
 });
 
-test('collection service preserves live-style pair-array cloudstorage documents', async () => {
+test('collection service preserves live-style pair-array documents and ignored-group memberships', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot, true);
   const configService = new ConfigService(fixture.env);
@@ -92,11 +99,11 @@ test('collection service preserves live-style pair-array cloudstorage documents'
 
   const preview = await collectionService.createPlan({
     mode: 'merge',
+    ignoreGroups: [' multiplayer '],
     rules: [
       {
-        appIds: [620],
-        addToCollections: ['Co-op'],
-        favorite: true
+        appIds: [440],
+        setCollections: ['Co-op']
       }
     ]
   });
@@ -124,10 +131,81 @@ test('collection service preserves live-style pair-array cloudstorage documents'
     removed: []
   });
 
+  const hidden = readPairArrayPayload(updated, 'user-collections.hidden') as { id: string; name: string; added: number[]; removed: number[] };
+  assert.deepEqual(hidden, {
+    id: 'hidden',
+    name: 'Hidden',
+    added: [440],
+    removed: []
+  });
+
+  const multiplayer = readPairArrayPayload(updated, 'user-collections.uc-multiplayer') as { id: string; name: string; added: number[]; removed: number[] };
+  assert.deepEqual(multiplayer, {
+    id: 'uc-multiplayer',
+    name: 'Multiplayer',
+    added: [440, 570],
+    removed: []
+  });
+
   const coop = readPairArrayPayload(updated, 'user-collections.uc-co-op') as { name: string; added: number[]; removed: number[] };
   assert.equal(coop.name, 'Co-op');
-  assert.deepEqual(coop.added, [620]);
+  assert.deepEqual(coop.added, [440]);
   assert.deepEqual(coop.removed, []);
+});
+
+test('collection service ignores legacy favorite operations during apply', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot, true);
+  const configService = new ConfigService(fixture.env);
+  const discovery = new SteamDiscoveryService(configService.resolve());
+  const sourcePath = path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json');
+  const backend = new CloudStorageJsonCollectionBackend(sourcePath, fixture.steamId);
+  const registry = new CollectionBackendRegistry([backend]);
+  const library = new LibraryService(
+    discovery,
+    registry,
+    new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new LinkService()
+  );
+  const collectionService = new CollectionService(
+    configService,
+    discovery,
+    registry,
+    library,
+    new SearchService(),
+    new SafetyService(async () => false)
+  );
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [620],
+        addToCollections: ['Co-op']
+      }
+    ]
+  });
+
+  const persistedPlan = JSON.parse(await readFile(preview.plan.planPath, 'utf8')) as {
+    operations: Record<string, Record<string, unknown> | undefined>;
+  };
+  const currentOperation = persistedPlan.operations['620'];
+  assert.ok(currentOperation);
+  persistedPlan.operations['620'] = {
+    ...currentOperation,
+    favorite: false
+  };
+  await writeFile(preview.plan.planPath, `${JSON.stringify(persistedPlan, null, 2)}\n`, 'utf8');
+
+  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  assert.equal(result.appliedOperationCount, 1);
+
+  const updated = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>;
+  assert.deepEqual(updated['user-collections.favorite'], ['620']);
+  const coop = updated['user-collections.uc-co-op'] as { apps: string[]; name: string };
+  assert.equal(coop.name, 'Co-op');
+  assert.deepEqual(coop.apps, ['620']);
 });
 
 test('collection service rejects non-UUID plan identifiers', async () => {
