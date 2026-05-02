@@ -5,6 +5,14 @@ import { Client } from '@modelcontextprotocol/sdk/client';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { materializeSteamFixture } from '../support/fixture-steam.js';
 
+function parseFirstTextContent(result: { content?: Array<{ type: string; text?: string }> }): unknown {
+  const firstContent = result.content?.[0];
+  assert.ok(firstContent);
+  assert.equal(firstContent.type, 'text');
+  assert.equal(typeof firstContent.text, 'string');
+  return JSON.parse(firstContent.text);
+}
+
 test('stdio server registers exact tools and answers basic calls', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
@@ -66,6 +74,62 @@ test('stdio server registers exact tools and answers basic calls', async () => {
   assert.match(JSON.stringify(links), /steam:\/\/run\/620/);
 
   assert.ok(stderrChunks.some((chunk) => chunk.includes('steam-mcp server connected')));
+
+  await client.close();
+});
+
+test('stdio server applies env-configured default protected groups', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  fixture.env.STEAM_DEFAULT_READ_ONLY_GROUPS = '["Puzzle"]';
+  fixture.env.STEAM_DEFAULT_IGNORE_GROUPS = '["Puzzle"]';
+
+  const client = new Client({ name: 'steam-mcp-test-client-default-groups', version: '0.1.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(repoRoot, 'packages', 'steam-mcp', 'dist', 'index.js')],
+    cwd: repoRoot,
+    env: fixture.env,
+    stderr: 'pipe'
+  });
+
+  await client.connect(transport);
+
+  const planResult = await client.callTool({
+    name: 'steam_collection_plan',
+    arguments: {
+      mode: 'merge',
+      rules: [
+        {
+          appIds: [620],
+          setCollections: ['Co-op']
+        }
+      ]
+    }
+  });
+  const planPayload = parseFirstTextContent(planResult) as {
+    plan: {
+      policies: {
+        readOnlyGroups: string[];
+        ignoreGroups: string[];
+      };
+    };
+  };
+  assert.deepEqual(planPayload.plan.policies, {
+    readOnlyGroups: ['Puzzle'],
+    ignoreGroups: ['Puzzle']
+  });
+
+  const similarResult = await client.callTool({
+    name: 'steam_find_similar',
+    arguments: {
+      query: 'portal 2',
+      scope: 'library',
+      limit: 10
+    }
+  });
+  const similarPayload = parseFirstTextContent(similarResult) as unknown[];
+  assert.deepEqual(similarPayload, []);
 
   await client.close();
 });
