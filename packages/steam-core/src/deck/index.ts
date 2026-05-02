@@ -12,7 +12,7 @@ export class DeckStatusProvider {
       return cached;
     }
 
-    const url = `https://store.steampowered.com/saleaction/ajaxgetdeckappcompatibilityreport?appid=${appId}`;
+    const url = `https://store.steampowered.com/saleaction/ajaxgetdeckappcompatibilityreport?nAppID=${appId}`;
     const response = await this.fetchImpl(url, { headers: { accept: 'application/json' } });
     if (!response.ok) {
       this.cache.set(appId, 'unknown');
