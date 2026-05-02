@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { normalizeCollectionName, uniqueCollectionNames } from '@steam-mcp/steam-core';
 import type { SteamMcpContext } from '../context.js';
 import { registerToolShallow } from '../mcp/register-tool-shallow.js';
 import { deckStatusSchema } from '../schemas/index.js';
@@ -27,9 +28,15 @@ export function registerSteamFindSimilarTool(server: McpServer, context: SteamMc
     },
     async (rawArgs) => {
       const args = steamFindSimilarArgsSchema.parse(rawArgs);
+      const config = context.configService.resolve();
+      const effectiveIgnoreGroups = uniqueCollectionNames([...config.defaultIgnoreGroups, ...(args.ignoreGroups ?? [])]);
+      const effectiveArgs = {
+        ...args,
+        ignoreGroups: effectiveIgnoreGroups
+      };
       const scope = args.scope ?? 'library';
       const library = await context.libraryService.list({ includeStoreMetadata: true, includeDeckStatus: true, limit: 5000 });
-      const libraryMatches = context.recommendService.rankSimilarLibraryGames(library.games, args);
+      const libraryMatches = context.recommendService.rankSimilarLibraryGames(library.games, effectiveArgs);
 
       if (scope === 'library') {
         return {
@@ -37,7 +44,7 @@ export function registerSteamFindSimilarTool(server: McpServer, context: SteamMc
         };
       }
 
-      const ignoredGroups = new Set((args.ignoreGroups ?? []).map((group) => group.trim().toLowerCase()).filter((group) => group !== ''));
+      const ignoredGroups = new Set(effectiveIgnoreGroups.map((group) => normalizeCollectionName(group)));
       const seedGames = args.seedAppIds?.length
         ? library.games.filter((game) => args.seedAppIds?.includes(game.appId) && !isIgnoredGame(game.collections, ignoredGroups))
         : library.games.filter((game) => args.query ? game.name.toLowerCase().includes(args.query.toLowerCase()) : false).filter((game) => !isIgnoredGame(game.collections, ignoredGroups)).slice(0, 3);
