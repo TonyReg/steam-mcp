@@ -32,50 +32,52 @@ test('stdio server registers exact tools and answers basic calls', async () => {
 
   await client.connect(transport);
 
-  const tools = await client.listTools();
-  const toolNames = tools.tools.map((tool) => tool.name).sort((left, right) => left.localeCompare(right));
-  assert.deepEqual(toolNames, [
-    'steam_collection_apply',
-    'steam_collection_plan',
-    'steam_export',
-    'steam_find_similar',
-    'steam_library_list',
-    'steam_library_search',
-    'steam_link_generate',
-    'steam_status',
-    'steam_store_search'
-  ]);
+  try {
+    const tools = await client.listTools();
+    const toolNames = tools.tools.map((tool) => tool.name).sort((left, right) => left.localeCompare(right));
+    assert.deepEqual(toolNames, [
+      'steam_collection_apply',
+      'steam_collection_plan',
+      'steam_export',
+      'steam_find_similar',
+      'steam_library_list',
+      'steam_library_search',
+      'steam_link_generate',
+      'steam_status',
+      'steam_store_search'
+    ]);
 
-  const prompts = await client.listPrompts();
-  const promptNames = prompts.prompts.map((prompt) => prompt.name).sort((left, right) => left.localeCompare(right));
-  assert.deepEqual(promptNames, [
-    'steam_collection_planner',
-    'steam_deck_backlog_triage',
-    'steam_library_curator'
-  ]);
+    const prompts = await client.listPrompts();
+    const promptNames = prompts.prompts.map((prompt) => prompt.name).sort((left, right) => left.localeCompare(right));
+    assert.deepEqual(promptNames, [
+      'steam_collection_planner',
+      'steam_deck_backlog_triage',
+      'steam_library_curator'
+    ]);
 
-  const collectionPlannerPrompt = await client.getPrompt({
-    name: 'steam_collection_planner',
-    arguments: {
-      request: 'Group co-op hidden backlog',
-      mode: 'merge'
-    }
-  });
-  assert.match(JSON.stringify(collectionPlannerPrompt), /steam_collection_plan/);
-  assert.match(JSON.stringify(collectionPlannerPrompt), /Group co-op hidden backlog/);
+    const collectionPlannerPrompt = await client.getPrompt({
+      name: 'steam_collection_planner',
+      arguments: {
+        request: 'Group co-op hidden backlog',
+        mode: 'merge'
+      }
+    });
+    assert.match(JSON.stringify(collectionPlannerPrompt), /steam_collection_plan/);
+    assert.match(JSON.stringify(collectionPlannerPrompt), /Group co-op hidden backlog/);
 
-  const status = await client.callTool({ name: 'steam_status', arguments: {} });
-  assert.match(JSON.stringify(status), /cloudstorage-json/);
+    const status = await client.callTool({ name: 'steam_status', arguments: {} });
+    assert.match(JSON.stringify(status), /cloudstorage-json/);
 
-  const library = await client.callTool({ name: 'steam_library_list', arguments: { limit: 2 } });
-  assert.match(JSON.stringify(library), /Portal 2/);
+    const library = await client.callTool({ name: 'steam_library_list', arguments: { limit: 2 } });
+    assert.match(JSON.stringify(library), /Portal 2/);
 
-  const links = await client.callTool({ name: 'steam_link_generate', arguments: { appIds: [620] } });
-  assert.match(JSON.stringify(links), /steam:\/\/run\/620/);
+    const links = await client.callTool({ name: 'steam_link_generate', arguments: { appIds: [620] } });
+    assert.match(JSON.stringify(links), /steam:\/\/run\/620/);
 
-  assert.ok(stderrChunks.some((chunk) => chunk.includes('steam-mcp server connected')));
-
-  await client.close();
+    assert.ok(stderrChunks.some((chunk) => chunk.includes('steam-mcp server connected')));
+  } finally {
+    await client.close();
+  }
 });
 
 test('stdio server applies env-configured default protected groups', async () => {
