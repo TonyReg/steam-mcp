@@ -134,6 +134,7 @@ export interface LibraryListOptions {
   collections?: string[];
   played?: boolean;
   deckStatuses?: DeckStatus[];
+  ignoreGroups?: string[];
   sortBy?: 'name' | 'playtime' | 'lastPlayed';
   limit?: number;
 }
@@ -157,6 +158,7 @@ export interface LibrarySearchOptions {
   collections?: string[];
   played?: boolean;
   deckStatuses?: DeckStatus[];
+  ignoreGroups?: string[];
   limit?: number;
 }
 
