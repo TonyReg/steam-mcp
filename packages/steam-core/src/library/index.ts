@@ -197,6 +197,13 @@ function buildGameRecord(
 }
 
 function filterGame(game: GameRecord, options: LibraryListOptions): boolean {
+  if (options.ignoreGroups?.length) {
+    const ignoredGroups = new Set(options.ignoreGroups.map((group) => normalizeCollectionName(group)));
+    if ((game.collections ?? []).some((collection) => ignoredGroups.has(normalizeCollectionName(collection)))) {
+      return false;
+    }
+  }
+
   if (options.installedOnly && !game.installed) {
     return false;
   }

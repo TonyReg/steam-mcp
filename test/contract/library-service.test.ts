@@ -75,6 +75,27 @@ test('library service matches collection filters case-insensitively', async () =
   assert.deepEqual(multiplayer.games.map((game) => game.appId).sort((left, right) => left - right), [440, 570]);
 });
 
+test('library service ignores groups case-insensitively', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  const config = new ConfigService(fixture.env).resolve();
+  const discovery = new SteamDiscoveryService(config);
+  const backend = new CloudStorageJsonCollectionBackend(
+    path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json'),
+    fixture.steamId
+  );
+  const library = new LibraryService(
+    discovery,
+    new CollectionBackendRegistry([backend]),
+    new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new LinkService()
+  );
+
+  const result = await library.list({ includeStoreMetadata: false, includeDeckStatus: false, ignoreGroups: [' multiplayer '], limit: 10 });
+  assert.deepEqual(result.games.map((game) => game.appId), [620]);
+});
+
 test('library service reads live-style pair-array cloudstorage collections', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
