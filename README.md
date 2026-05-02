@@ -51,6 +51,10 @@ docs/design/
 
 These prompts are the v1 agent-facing workflow surface. They guide clients toward the safe tool order, keep collection changes plan-first, and do not bypass the Steam-owned write gate.
 
+- `steam_library_curator` is library-first, but may add store enrichment/comparison when useful.
+- `steam_collection_planner` is the plan-first workflow for collections, hidden-state changes, and protected-group-aware planning.
+- `steam_deck_backlog_triage` is owned-library/backlog focused rather than general store discovery.
+
 ## Environment
 
 - `STEAM_ID`
