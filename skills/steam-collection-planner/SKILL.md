@@ -1,6 +1,6 @@
 ---
 name: steam-collection-planner
-description: "Use when the user wants to plan Steam collection, favorite, or hidden-state changes safely before any apply step. Trigger phrases: 'create categories', 'plan Steam collections', 'organize favorites', 'hide games', 'prepare collection changes'."
+description: "Use when the user wants to plan Steam collection or hidden-state changes safely before any apply step. Trigger phrases: 'create categories', 'plan Steam collections', 'hide games', 'prepare collection changes'."
 ---
 
 # Steam Collection Planner
@@ -10,7 +10,7 @@ Use this skill for plan-first Steam collection workflows built on top of the Ste
 ## When to Use
 
 - The user wants to create or reorganize named collections.
-- The user wants to adjust favorites or hidden flags.
+- The user wants to adjust hidden flags or protect user-managed groups from MCP changes.
 - The user wants a safe preview before any Steam-owned mutation happens.
 
 ## Workflow
