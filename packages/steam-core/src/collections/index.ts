@@ -31,6 +31,7 @@ export class CollectionService {
   ) {}
 
   async createPlan(request: CollectionPlanRequest): Promise<CollectionPlanPreview> {
+    const config = this.configService.resolve();
     const discovery = await this.discoveryService.discover();
     if (!discovery.selectedUserId || !discovery.collectionBackendId || !discovery.collectionSourcePath) {
       throw new Error('No selected Steam user with a cloudstorage-json backend is available for planning.');
@@ -50,7 +51,10 @@ export class CollectionService {
       this.libraryService.list({ includeStoreMetadata: false, includeDeckStatus: false, limit: 5000 })
     ]);
 
-    const policies = normalizePolicies(request);
+    const policies = normalizePolicies({
+      readOnlyGroups: [...config.defaultReadOnlyGroups, ...(request.readOnlyGroups ?? [])],
+      ignoreGroups: [...config.defaultIgnoreGroups, ...(request.ignoreGroups ?? [])]
+    });
     const rules = normalizeRules(request);
     const warnings = [...snapshot.sourcePath ? [] : ['Collection source path is missing.']];
     const operations: CollectionPlan['operations'] = {};

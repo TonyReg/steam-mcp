@@ -208,6 +208,50 @@ test('collection service ignores legacy favorite operations during apply', async
   assert.deepEqual(coop.apps, ['620']);
 });
 
+test('collection service merges env default protected groups into persisted plan policies', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  fixture.env.STEAM_DEFAULT_READ_ONLY_GROUPS = '["Puzzle"]';
+  fixture.env.STEAM_DEFAULT_IGNORE_GROUPS = '["Multiplayer"]';
+  const configService = new ConfigService(fixture.env);
+  const discovery = new SteamDiscoveryService(configService.resolve());
+  const sourcePath = path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json');
+  const backend = new CloudStorageJsonCollectionBackend(sourcePath, fixture.steamId);
+  const registry = new CollectionBackendRegistry([backend]);
+  const library = new LibraryService(
+    discovery,
+    registry,
+    new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new LinkService()
+  );
+  const collectionService = new CollectionService(
+    configService,
+    discovery,
+    registry,
+    library,
+    new SearchService(),
+    new SafetyService(async () => false)
+  );
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    readOnlyGroups: ['Co-op'],
+    ignoreGroups: ['Backlog'],
+    rules: [
+      {
+        appIds: [620],
+        addToCollections: ['Co-op']
+      }
+    ]
+  });
+
+  assert.deepEqual(preview.plan.policies, {
+    readOnlyGroups: ['Co-op', 'Puzzle'],
+    ignoreGroups: ['Backlog', 'Multiplayer']
+  });
+});
+
 test('collection service rejects non-UUID plan identifiers', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);

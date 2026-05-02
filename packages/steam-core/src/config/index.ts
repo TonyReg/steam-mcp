@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { SteamRuntimeConfig, SteamStateDirectories } from '../types.js';
-import { normalizeAbsolutePath, normalizeOptionalAbsolutePath } from '../utils.js';
+import { normalizeAbsolutePath, normalizeOptionalAbsolutePath, uniqueCollectionNames } from '../utils.js';
 
 export class ConfigService {
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
@@ -12,7 +12,9 @@ export class ConfigService {
       installDirOverride: normalizeOptionalAbsolutePath(this.env.STEAM_INSTALL_DIR),
       userdataDirOverride: normalizeOptionalAbsolutePath(this.env.STEAM_USERDATA_DIR),
       stateDirectories: this.resolveStateDirectories(),
-      collectionWritesEnabled: this.env.STEAM_ENABLE_COLLECTION_WRITES === '1'
+      collectionWritesEnabled: this.env.STEAM_ENABLE_COLLECTION_WRITES === '1',
+      defaultReadOnlyGroups: this.parseCollectionGroupEnv('STEAM_DEFAULT_READ_ONLY_GROUPS'),
+      defaultIgnoreGroups: this.parseCollectionGroupEnv('STEAM_DEFAULT_IGNORE_GROUPS')
     };
   }
 
@@ -25,6 +27,26 @@ export class ConfigService {
       mkdir(directories.logsDir, { recursive: true })
     ]);
     return directories;
+  }
+
+  private parseCollectionGroupEnv(name: 'STEAM_DEFAULT_READ_ONLY_GROUPS' | 'STEAM_DEFAULT_IGNORE_GROUPS'): string[] {
+    const rawValue = this.env[name];
+    if (!rawValue || rawValue.trim() === '') {
+      return [];
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawValue);
+    } catch {
+      throw new Error(`${name} must be a JSON array of strings.`);
+    }
+
+    if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== 'string')) {
+      throw new Error(`${name} must be a JSON array of strings.`);
+    }
+
+    return uniqueCollectionNames(parsed);
   }
 
   private resolveStateDirectories(): SteamStateDirectories {

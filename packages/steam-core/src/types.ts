@@ -197,6 +197,8 @@ export interface SteamRuntimeConfig {
   userdataDirOverride?: string;
   stateDirectories: SteamStateDirectories;
   collectionWritesEnabled: boolean;
+  defaultReadOnlyGroups: string[];
+  defaultIgnoreGroups: string[];
 }
 
 export interface SteamDiscoveryResult {
