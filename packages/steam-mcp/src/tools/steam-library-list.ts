@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SteamMcpContext } from '../context.js';
+import { registerToolShallow } from '../mcp/register-tool-shallow.js';
 import { deckStatusSchema } from '../schemas/index.js';
 
 const steamLibraryListInputShape = {
@@ -20,7 +21,8 @@ const steamLibraryListArgsSchema = z.object(steamLibraryListInputShape);
 const steamLibraryListInputSchema: Record<string, z.ZodTypeAny> = steamLibraryListInputShape;
 
 export function registerSteamLibraryListTool(server: McpServer, context: SteamMcpContext): void {
-  server.registerTool(
+  registerToolShallow(
+    server,
     'steam_library_list',
     {
       title: 'Steam library list',
