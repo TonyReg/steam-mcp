@@ -202,6 +202,47 @@ test('library service resolves deck statuses through the live nAppID request con
   }
 });
 
+test('library service infers deck enrichment when deck status filters are requested', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  const config = new ConfigService(fixture.env).resolve();
+  const discovery = new SteamDiscoveryService(config);
+  const backend = new CloudStorageJsonCollectionBackend(
+    path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json'),
+    fixture.steamId
+  );
+  const requestedUrls: string[] = [];
+  const deckResponses = new Map([
+    ['620', '{"results":{"resolved_category":3}}'],
+    ['440', '{"results":{"resolved_category":2}}'],
+    ['570', '{"results":{"resolved_category":1}}']
+  ]);
+  const deckProvider = new DeckStatusProvider(async (input) => {
+    const requestUrl = new URL(String(input));
+    requestedUrls.push(requestUrl.toString());
+    const payload = requestUrl.searchParams.get('nAppID')
+      ? deckResponses.get(requestUrl.searchParams.get('nAppID')!) ?? '{"success":1,"results":[]}'
+      : '{"success":1,"results":[]}';
+
+    return new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  });
+  const library = new LibraryService(
+    discovery,
+    new CollectionBackendRegistry([backend]),
+    new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    deckProvider,
+    new LinkService()
+  );
+
+  const result = await library.list({ includeStoreMetadata: false, deckStatuses: ['verified', 'playable'], limit: 10 });
+  assert.deepEqual(result.games.map((game) => game.appId).sort((left, right) => left - right), [440, 620]);
+
+  const statusesByApp = new Map(result.games.map((game) => [game.appId, game.deckStatus]));
+  assert.equal(statusesByApp.get(620), 'verified');
+  assert.equal(statusesByApp.get(440), 'playable');
+  assert.equal(requestedUrls.length, 3);
+});
+
 test('library service rejects ambiguous collection names that differ only by case', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);

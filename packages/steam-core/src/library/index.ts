@@ -32,6 +32,7 @@ export class LibraryService {
   async list(options: LibraryListOptions = {}): Promise<LibraryListResult> {
     const discovery = await this.discoveryService.discover();
     const warnings = [...discovery.warnings];
+    const shouldIncludeDeckStatus = Boolean(options.includeDeckStatus || options.deckStatuses?.length);
     const installedApps = await this.readInstalledApps(discovery.libraryFolders, warnings);
     const localAppState = discovery.localConfigPath ? await this.readLocalAppState(discovery.localConfigPath, warnings) : new Map<string, LocalAppState>();
     const backend = discovery.collectionBackendId && discovery.collectionSourcePath && discovery.selectedUserId
@@ -54,7 +55,7 @@ export class LibraryService {
       const storeMetadata = (options.includeStoreMetadata || !installed?.name) ? await this.safeGetAppDetails(numericAppId, warnings) : undefined;
       const record = buildGameRecord(appId, installed, local, snapshot, storeMetadata, this.linkService);
 
-      if (options.includeDeckStatus) {
+      if (shouldIncludeDeckStatus) {
         try {
           record.deckStatus = await this.deckStatusProvider.getStatus(numericAppId);
         } catch (error) {
