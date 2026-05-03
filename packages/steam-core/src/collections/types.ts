@@ -1,7 +1,12 @@
 import type { CollectionPlan, CollectionSnapshot } from '../types.js';
 
+export interface CollectionBackendFileWrite {
+  targetPath: string;
+  content: string;
+}
+
 export interface CollectionBackendApplyDraft {
-  nextDocument: string;
+  writes: CollectionBackendFileWrite[];
   expectedSnapshotHash: string;
 }
 

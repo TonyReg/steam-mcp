@@ -54,7 +54,7 @@ export class CollectionService {
     const [snapshot, library] = await Promise.all([
       backend.readSnapshot(),
       this.libraryService.list({
-        includeStoreMetadata: false,
+        includeStoreMetadata: true,
         includeDeckStatus: false,
         ignoreGroups: policies.ignoreGroups,
         limit: 5000
@@ -154,12 +154,42 @@ export class CollectionService {
       };
     }
 
-    const collectionTargetPath = this.safetyService.assertCollectionWriteTarget(discovery.collectionSourcePath, discovery.selectedUserDir);
-    const backupPath = await this.safetyService.createBackup(collectionTargetPath, config.stateDirectories.backupsDir);
+    this.safetyService.assertCollectionWriteTarget(discovery.collectionSourcePath, discovery.selectedUserDir);
+    const draft = await backend.applyPlan(plan, snapshot);
+    if (draft.writes.length === 0) {
+      return {
+        planId: normalizedPlanId,
+        dryRun: false,
+        backendId: backend.backendId,
+        appliedOperationCount,
+        warnings: plan.warnings,
+        skipped: []
+      };
+    }
+
+    const targetPaths = this.safetyService.assertCollectionWriteTargets(
+      draft.writes.map((write) => write.targetPath),
+      discovery.selectedUserDir
+    );
+    if (targetPaths.length !== draft.writes.length || targetPaths[0] === undefined) {
+      throw new Error('Collection backend returned an invalid write target set.');
+    }
+
+    const writes = draft.writes.map((write, index) => ({
+      ...write,
+      targetPath: targetPaths[index] ?? write.targetPath
+    }));
+    const rollbackPath = targetPaths[0];
+    const backupsByTargetPath = await this.safetyService.createBackups(targetPaths, config.stateDirectories.backupsDir);
 
     try {
-      const draft = await backend.applyPlan(plan, snapshot);
-      await this.safetyService.atomicWrite(collectionTargetPath, draft.nextDocument);
+      await this.safetyService.atomicWriteMany(writes);
+      await Promise.all(writes.map(async (write) => {
+        const actualContent = await readFile(write.targetPath, 'utf8');
+        if (actualContent !== write.content) {
+          throw new Error(`Post-write verification failed because ${write.targetPath} did not match the expected content.`);
+        }
+      }));
       const verifySnapshot = await backend.readSnapshot();
       if (verifySnapshot.snapshotHash !== draft.expectedSnapshotHash) {
         throw new Error('Post-write verification failed because the snapshot hash did not match the expected result.');
@@ -170,13 +200,13 @@ export class CollectionService {
         dryRun: false,
         backendId: backend.backendId,
         appliedOperationCount,
-        backupPath,
-        rollbackPath: backupPath,
+        backupPath: rollbackPath,
+        rollbackPath,
         warnings: plan.warnings,
         skipped: []
       };
     } catch (error) {
-      await this.safetyService.rollback(collectionTargetPath, backupPath);
+      await this.safetyService.rollbackMany(backupsByTargetPath);
       throw error;
     }
   }

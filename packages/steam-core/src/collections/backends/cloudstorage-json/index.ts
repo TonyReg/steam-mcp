@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { CollectionPlan, CollectionSnapshot } from '../../../types.js';
 import { appIdString, hashValue, isRecord, normalizeAbsolutePath, normalizeCollectionName, parseJson, slugify, stableStringify, toBoolean, toCollectionNameSet, uniqueCollectionNames, uniqueStrings } from '../../../utils.js';
 import type { CollectionBackendAdapter, CollectionBackendApplyDraft } from '../../types.js';
@@ -13,6 +14,13 @@ interface ParsedCloudStorageDocument {
   format: CloudStorageDocumentFormat;
   keyOrder: string[];
 }
+
+interface ParsedCloudStorageNamespaceDocument {
+  values: Array<[number, string]>;
+  valueByNamespace: Map<number, string>;
+}
+
+const COLLECTION_NAMESPACE_ID = 1;
 
 export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapter {
   readonly backendId = 'cloudstorage-json';
@@ -58,9 +66,27 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
     const parsedDocument = await this.readDocument();
     const nextDocument = updateDocument(parsedDocument.document, plan, snapshot);
     const nextSnapshot = buildSnapshot(nextDocument, this.sourcePath, this.steamId, this.backendId);
+    const documentChanged = stableStringify(nextDocument) !== stableStringify(parsedDocument.document);
+    const namespacePath = resolveNamespaceMetadataPath(this.sourcePath);
+    const parsedNamespaces = await this.readNamespacesDocument(namespacePath);
+    const currentNamespaceValue = parsedNamespaces.valueByNamespace.get(COLLECTION_NAMESPACE_ID);
+    const nextNamespaceValue = documentChanged ? bumpNamespaceValue(currentNamespaceValue) : currentNamespaceValue;
+    const writes = documentChanged
+      ? [{
+          targetPath: this.sourcePath,
+          content: serializeDocument(nextDocument, parsedDocument.format, parsedDocument.keyOrder, parsedDocument.document, nextNamespaceValue)
+        }]
+      : [];
+
+    if (nextNamespaceValue !== undefined && nextNamespaceValue !== currentNamespaceValue) {
+      writes.push({
+        targetPath: namespacePath,
+        content: serializeNamespacesDocument(updateNamespacesDocument(parsedNamespaces.values, nextNamespaceValue))
+      });
+    }
 
     return {
-      nextDocument: serializeDocument(nextDocument, parsedDocument.format, parsedDocument.keyOrder),
+      writes,
       expectedSnapshotHash: nextSnapshot.snapshotHash
     };
   }
@@ -69,6 +95,12 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
     const text = await readFile(this.sourcePath, 'utf8');
     const parsed = parseJson(text);
     return normalizeDocument(parsed, this.sourcePath);
+  }
+
+  private async readNamespacesDocument(namespacePath: string): Promise<ParsedCloudStorageNamespaceDocument> {
+    const text = await readFile(namespacePath, 'utf8');
+    const parsed = parseJson(text);
+    return normalizeNamespacesDocument(parsed, namespacePath);
   }
 }
 
@@ -119,7 +151,36 @@ function normalizeDocument(parsed: unknown, sourcePath: string): ParsedCloudStor
   throw new Error(`Collection backend file ${sourcePath} is not a supported JSON document.`);
 }
 
-function serializeDocument(document: CloudStorageDocument, format: CloudStorageDocumentFormat, keyOrder: string[]): string {
+function normalizeNamespacesDocument(parsed: unknown, sourcePath: string): ParsedCloudStorageNamespaceDocument {
+  if (!Array.isArray(parsed)) {
+    throw new Error(`Collection namespace file ${sourcePath} is not a supported JSON document.`);
+  }
+
+  const values: Array<[number, string]> = [];
+  const valueByNamespace = new Map<number, string>();
+
+  for (const [index, entry] of parsed.entries()) {
+    if (!Array.isArray(entry) || entry.length < 2 || typeof entry[0] !== 'number' || typeof entry[1] !== 'string') {
+      throw new Error(`Collection namespace file ${sourcePath} contains an unsupported array entry shape at index ${index}.`);
+    }
+
+    values.push([entry[0], entry[1]]);
+    valueByNamespace.set(entry[0], entry[1]);
+  }
+
+  return {
+    values,
+    valueByNamespace
+  };
+}
+
+function serializeDocument(
+  document: CloudStorageDocument,
+  format: CloudStorageDocumentFormat,
+  keyOrder: string[],
+  previousDocument: CloudStorageDocument = createCloudStorageDocument(),
+  nextNamespaceValue?: string
+): string {
   if (format === 'object') {
     return `${JSON.stringify(document, null, 2)}\n`;
   }
@@ -129,14 +190,14 @@ function serializeDocument(document: CloudStorageDocument, format: CloudStorageD
 
   for (const key of keyOrder) {
     if (Object.hasOwn(document, key)) {
-      entries.push([key, wrapPairArrayValue(key, document[key])]);
+      entries.push([key, wrapPairArrayValue(key, document[key], previousDocument[key], nextNamespaceValue)]);
       seen.add(key);
     }
   }
 
   for (const key of Object.keys(document)) {
     if (!seen.has(key)) {
-      entries.push([key, wrapPairArrayValue(key, document[key])]);
+      entries.push([key, wrapPairArrayValue(key, document[key], previousDocument[key], nextNamespaceValue)]);
     }
   }
 
@@ -180,23 +241,41 @@ function unwrapCollectionValue(value: unknown): unknown {
   return payload;
 }
 
-function wrapPairArrayValue(key: string, value: unknown): unknown {
-  if (isWrappedCloudStorageEntry(value)) {
-    return value;
-  }
-
+function wrapPairArrayValue(
+  key: string,
+  value: unknown,
+  previousValue?: unknown,
+  nextNamespaceValue?: string
+): unknown {
   if (!key.startsWith('user-collections.')) {
     return value;
   }
 
   const payload = buildPairArrayPayload(key, value);
+  const nextValue = JSON.stringify(payload);
+
+  if (isWrappedCloudStorageEntry(value)) {
+    if (!didCollectionPayloadChange(previousValue, value)) {
+      return value;
+    }
+
+    return refreshWrappedCloudStorageValue(value, nextValue, nextNamespaceValue);
+  }
 
   return {
     key,
     timestamp: Math.floor(Date.now() / 1000),
-    value: JSON.stringify(payload),
-    version: '1'
+    value: nextValue,
+    version: nextNamespaceValue ?? '1'
   };
+}
+
+function didCollectionPayloadChange(previousValue: unknown, nextValue: unknown): boolean {
+  if (previousValue === undefined) {
+    return true;
+  }
+
+  return stableStringify(unwrapCollectionValue(previousValue)) !== stableStringify(unwrapCollectionValue(nextValue));
 }
 
 function buildPairArrayPayload(key: string, value: unknown): unknown {
@@ -429,6 +508,42 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
   return nextDocument;
 }
 
+function resolveNamespaceMetadataPath(sourcePath: string): string {
+  return path.join(path.dirname(sourcePath), 'cloud-storage-namespaces.json');
+}
+
+function bumpNamespaceValue(value: string | undefined): string {
+  const numericValue = Number(value ?? '0');
+  if (!Number.isInteger(numericValue) || numericValue < 0) {
+    throw new Error(`Collection namespace value ${value ?? '<missing>'} is not a supported non-negative integer string.`);
+  }
+
+  return String(numericValue + 1);
+}
+
+function updateNamespacesDocument(values: Array<[number, string]>, nextNamespaceValue: string): Array<[number, string]> {
+  let sawCollectionNamespace = false;
+
+  const nextValues = values.map(([namespaceId, value]) => {
+    if (namespaceId !== COLLECTION_NAMESPACE_ID) {
+      return [namespaceId, value] as [number, string];
+    }
+
+    sawCollectionNamespace = true;
+    return [namespaceId, nextNamespaceValue] as [number, string];
+  });
+
+  if (!sawCollectionNamespace) {
+    nextValues.push([COLLECTION_NAMESPACE_ID, nextNamespaceValue]);
+  }
+
+  return nextValues;
+}
+
+function serializeNamespacesDocument(values: Array<[number, string]>): string {
+  return `${JSON.stringify(values, null, 2)}\n`;
+}
+
 function resolveSnapshotCollectionName(collectionName: string, snapshot: CollectionSnapshot): string {
   return snapshot.rawMetadata.displayNameMap[normalizeCollectionName(collectionName)] ?? collectionName.trim();
 }
@@ -467,11 +582,7 @@ function rewriteMembershipValue(original: unknown, members: Set<string>): unknow
 
   if (isWrappedCloudStorageEntry(original)) {
     const nextPayload = rewriteMembershipPayload(normalizedOriginal, sortedMembers);
-    const { is_deleted, ...rest } = original;
-    return {
-      ...rest,
-      value: JSON.stringify(nextPayload)
-    };
+    return refreshWrappedCloudStorageValue(original, JSON.stringify(nextPayload));
   }
 
   if (Array.isArray(normalizedOriginal)) {
@@ -518,11 +629,7 @@ function rewriteNamedCollectionValue(original: unknown, collectionName: string, 
 
   if (isWrappedCloudStorageEntry(original)) {
     const nextPayload = rewriteNamedCollectionPayload(normalizedOriginal, collectionName, sortedMembers, original.key);
-    const { is_deleted, ...rest } = original;
-    return {
-      ...rest,
-      value: JSON.stringify(nextPayload)
-    };
+    return refreshWrappedCloudStorageValue(original, JSON.stringify(nextPayload));
   }
 
   if (isRecord(normalizedOriginal)) {
@@ -598,6 +705,35 @@ function rewriteNamedCollectionPayload(
   };
 }
 
+function refreshWrappedCloudStorageValue(
+  original: Record<string, unknown> & { key: string },
+  nextValue: string,
+  nextVersion?: string
+): unknown {
+  if (original.value === nextValue && (nextVersion === undefined || original.version === nextVersion)) {
+    return original;
+  }
+
+  return {
+    ...original,
+    timestamp: Math.floor(Date.now() / 1000),
+    value: nextValue,
+    version: normalizeWrappedVersion(nextVersion ?? original.version)
+  };
+}
+
+function normalizeWrappedVersion(version: unknown): string {
+  if (typeof version === 'string' && /^\d+$/.test(version)) {
+    return version;
+  }
+
+  if (typeof version === 'number' && Number.isInteger(version) && version >= 0) {
+    return String(version);
+  }
+
+  return '1';
+}
+
 function serializeMembershipArray(sortedMembers: string[], preferNumeric = false): Array<string | number> {
   if (preferNumeric && sortedMembers.every((member) => /^\d+$/.test(member))) {
     return sortedMembers.map((member) => Number(member));
@@ -608,9 +744,15 @@ function serializeMembershipArray(sortedMembers: string[], preferNumeric = false
 
 export const cloudStorageJsonInternals = {
   buildSnapshot,
+  bumpNamespaceValue,
   membershipFromValue,
   normalizeDocument,
+  normalizeNamespacesDocument,
+  refreshWrappedCloudStorageValue,
+  resolveNamespaceMetadataPath,
   serializeDocument,
+  serializeNamespacesDocument,
+  updateNamespacesDocument,
   updateDocument,
   stableStringify
 };

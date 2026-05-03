@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { ensurePathInsideRoot, normalizeAbsolutePath } from '../utils.js';
 
 const execFile = promisify(execFileCallback);
-const COLLECTION_FILE_NAME = 'cloud-storage-namespace-1.json';
+const COLLECTION_FILE_NAMES = new Set(['cloud-storage-namespace-1.json', 'cloud-storage-namespaces.json']);
 
 export class SafetyService {
   constructor(private readonly steamRunningDetector?: () => Promise<boolean>) {}
@@ -38,6 +38,15 @@ export class SafetyService {
     return backupPath;
   }
 
+  async createBackups(sourcePaths: string[], backupsDir: string): Promise<Record<string, string>> {
+    const backups = await Promise.all(sourcePaths.map(async (sourcePath) => {
+      const backupPath = await this.createBackup(sourcePath, backupsDir);
+      return [normalizeAbsolutePath(sourcePath), backupPath] as const;
+    }));
+
+    return Object.fromEntries(backups);
+  }
+
   async atomicWrite(targetPath: string, content: string): Promise<void> {
     const normalizedTargetPath = normalizeAbsolutePath(targetPath);
     const tempPath = `${normalizedTargetPath}.tmp`;
@@ -45,9 +54,21 @@ export class SafetyService {
     await rename(tempPath, normalizedTargetPath);
   }
 
+  async atomicWriteMany(writes: Array<{ targetPath: string; content: string }>): Promise<void> {
+    for (const write of writes) {
+      await this.atomicWrite(write.targetPath, write.content);
+    }
+  }
+
   async rollback(targetPath: string, backupPath: string): Promise<void> {
     const content = await readFile(normalizeAbsolutePath(backupPath), 'utf8');
     await this.atomicWrite(normalizeAbsolutePath(targetPath), content);
+  }
+
+  async rollbackMany(backupsByTargetPath: Record<string, string>): Promise<void> {
+    for (const [targetPath, backupPath] of Object.entries(backupsByTargetPath)) {
+      await this.rollback(targetPath, backupPath);
+    }
   }
 
   assertCollectionWriteTarget(targetPath: string, selectedUserDir: string): string {
@@ -58,11 +79,16 @@ export class SafetyService {
       'Steam cloudstorage directory'
     );
     const normalizedTargetPath = ensurePathInsideRoot(targetPath, expectedDirectory, 'Steam collection target');
+    const targetFileName = path.basename(normalizedTargetPath).toLowerCase();
 
-    if (path.basename(normalizedTargetPath).toLowerCase() !== COLLECTION_FILE_NAME) {
-      throw new Error(`Steam collection writes are limited to ${COLLECTION_FILE_NAME}.`);
+    if (!COLLECTION_FILE_NAMES.has(targetFileName)) {
+      throw new Error(`Steam collection writes are limited to ${[...COLLECTION_FILE_NAMES].join(', ')}.`);
     }
 
     return normalizedTargetPath;
+  }
+
+  assertCollectionWriteTargets(targetPaths: string[], selectedUserDir: string): string[] {
+    return targetPaths.map((targetPath) => this.assertCollectionWriteTarget(targetPath, selectedUserDir));
   }
 }
