@@ -3,7 +3,7 @@ import type { DeckStatus, StoreAppDetails, StoreSearchCandidate, StoreSearchOpti
 import { isRecord, uniqueStrings } from '../utils.js';
 
 export class StoreClient {
-  private readonly detailCache = new Map<number, StoreAppDetails | undefined>();
+  private readonly detailCache = new Map<number, StoreAppDetails>();
 
   constructor(
     private readonly fetchImpl: typeof fetch = fetch,
@@ -40,8 +40,9 @@ export class StoreClient {
   }
 
   async getAppDetails(appId: number): Promise<StoreAppDetails | undefined> {
-    if (this.detailCache.has(appId)) {
-      return this.detailCache.get(appId);
+    const cached = this.detailCache.get(appId);
+    if (cached) {
+      return cached;
     }
 
     const url = new URL('https://store.steampowered.com/api/appdetails');
@@ -51,13 +52,14 @@ export class StoreClient {
 
     const response = await this.fetchImpl(url, { headers: { accept: 'application/json' } });
     if (!response.ok) {
-      this.detailCache.set(appId, undefined);
       return undefined;
     }
 
     const payload = (await response.json()) as unknown;
     const details = normalizeAppDetails(appId, payload);
-    this.detailCache.set(appId, details);
+    if (details) {
+      this.detailCache.set(appId, details);
+    }
     return details;
   }
 }

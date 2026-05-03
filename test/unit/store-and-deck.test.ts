@@ -30,6 +30,55 @@ test('store client and deck provider normalize fixture payloads', async () => {
   assert.deepEqual(details.genres, ['Adventure', 'Puzzle']);
 });
 
+test('store client normalizes sparse appdetails payloads', async () => {
+  const storeClient = new StoreClient(async () => new Response(JSON.stringify({
+    '620': {
+      success: true,
+      data: {
+        steam_appid: 620,
+        name: 'Portal 2'
+      }
+    }
+  }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response);
+
+  const details = await storeClient.getAppDetails(620);
+  assert.ok(details);
+  assert.equal(details.name, 'Portal 2');
+  assert.deepEqual(details.developers, []);
+  assert.deepEqual(details.publishers, []);
+  assert.deepEqual(details.tags, []);
+  assert.equal(details.storeUrl, 'https://store.steampowered.com/app/620/');
+});
+
+test('store client does not cache failed or unusable appdetails responses', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const appDetailsPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-620.json'), 'utf8');
+  let requestCount = 0;
+
+  const storeClient = new StoreClient(async () => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
+    }
+
+    if (requestCount === 2) {
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }
+
+    return new Response(appDetailsPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  });
+
+  const first = await storeClient.getAppDetails(620);
+  const second = await storeClient.getAppDetails(620);
+  const third = await storeClient.getAppDetails(620);
+
+  assert.equal(first, undefined);
+  assert.equal(second, undefined);
+  assert.ok(third);
+  assert.equal(third.name, 'Portal 2');
+  assert.equal(requestCount, 3);
+});
+
 test('deck status provider uses the live nAppID request contract', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const deckPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'deck-620.json'), 'utf8');
