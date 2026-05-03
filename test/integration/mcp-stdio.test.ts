@@ -80,6 +80,67 @@ test('stdio server registers exact tools and answers basic calls', async () => {
   }
 });
 
+test('stdio server reports missing Steam Web API key in status', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  delete fixture.env.STEAM_API_KEY;
+  delete fixture.env.STEAM_WEB_API_KEY;
+
+  const client = new Client({ name: 'steam-mcp-test-client-status-missing-key', version: '0.1.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(repoRoot, 'packages', 'steam-mcp', 'dist', 'index.js')],
+    cwd: repoRoot,
+    env: fixture.env,
+    stderr: 'pipe'
+  });
+
+  await client.connect(transport);
+
+  try {
+    const statusResult = await client.callTool({ name: 'steam_status', arguments: {} });
+    const statusPayload = parseFirstTextContent(statusResult) as {
+      steamWebApiKeyAvailable: boolean;
+      warnings: string[];
+    };
+
+    assert.equal(statusPayload.steamWebApiKeyAvailable, false);
+    assert.ok(statusPayload.warnings.some((warning) => warning.includes('Steam Web API key not available in MCP runtime')));
+  } finally {
+    await client.close();
+  }
+});
+
+test('stdio server reports Steam Web API key availability when configured', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  fixture.env.STEAM_API_KEY = 'test-key';
+
+  const client = new Client({ name: 'steam-mcp-test-client-status-key-present', version: '0.1.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(repoRoot, 'packages', 'steam-mcp', 'dist', 'index.js')],
+    cwd: repoRoot,
+    env: fixture.env,
+    stderr: 'pipe'
+  });
+
+  await client.connect(transport);
+
+  try {
+    const statusResult = await client.callTool({ name: 'steam_status', arguments: {} });
+    const statusPayload = parseFirstTextContent(statusResult) as {
+      steamWebApiKeyAvailable: boolean;
+      warnings: string[];
+    };
+
+    assert.equal(statusPayload.steamWebApiKeyAvailable, true);
+    assert.equal(statusPayload.warnings.some((warning) => warning.includes('Steam Web API key not available in MCP runtime')), false);
+  } finally {
+    await client.close();
+  }
+});
+
 test('stdio server applies env-configured default protected groups', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);

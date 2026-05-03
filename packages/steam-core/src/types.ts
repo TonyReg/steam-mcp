@@ -195,6 +195,7 @@ export interface SteamStateDirectories {
 
 export interface SteamRuntimeConfig {
   steamId?: string;
+  steamWebApiKey?: string;
   installDirOverride?: string;
   userdataDirOverride?: string;
   stateDirectories: SteamStateDirectories;
@@ -221,6 +222,7 @@ export interface SteamStatusResult {
   userIds: string[];
   selectedUserId?: string;
   steamRunning: boolean;
+  steamWebApiKeyAvailable: boolean;
   collectionBackendId?: string;
   collectionSourcePath?: string;
   collectionApplyEnabled: boolean;

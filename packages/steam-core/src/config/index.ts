@@ -7,8 +7,11 @@ export class ConfigService {
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
 
   resolve(): SteamRuntimeConfig {
+    const steamWebApiKey = normalizeOptionalEnvValue(this.env.STEAM_API_KEY ?? this.env.STEAM_WEB_API_KEY);
+
     return {
       steamId: this.env.STEAM_ID,
+      steamWebApiKey,
       installDirOverride: normalizeOptionalAbsolutePath(this.env.STEAM_INSTALL_DIR),
       userdataDirOverride: normalizeOptionalAbsolutePath(this.env.STEAM_USERDATA_DIR),
       stateDirectories: this.resolveStateDirectories(),
@@ -62,4 +65,13 @@ export class ConfigService {
       logsDir: normalizeAbsolutePath(path.join(root, 'logs'))
     };
   }
+}
+
+function normalizeOptionalEnvValue(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
 }
