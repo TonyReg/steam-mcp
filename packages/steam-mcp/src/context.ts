@@ -14,6 +14,7 @@ import {
   SteamDiscoveryService,
   StoreClient
 } from '@steam-mcp/steam-core';
+import { createStoreAppDetailsFallbackFetch } from './store-appdetails-fallback.js';
 
 export interface SteamMcpContext {
   configService: ConfigService;
@@ -36,7 +37,11 @@ export function createSteamMcpContext(env: NodeJS.ProcessEnv = process.env): Ste
   const discoveryService = new SteamDiscoveryService(config);
   const deckStatusProvider = new DeckStatusProvider();
   const linkService = new LinkService();
-  const storeClient = new StoreClient(fetch, deckStatusProvider);
+  const storeClient = new StoreClient(createStoreAppDetailsFallbackFetch({
+    fetchImpl: fetch,
+    steamWebApiKey: config.steamWebApiKey,
+    getSelectedUserId: async () => (await discoveryService.discover()).selectedUserId
+  }), deckStatusProvider);
 
   const backendRegistry = new CollectionBackendRegistry([], {
     'cloudstorage-json': (sourcePath, steamId) => new CloudStorageJsonCollectionBackend(sourcePath, steamId)
