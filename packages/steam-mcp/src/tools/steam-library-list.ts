@@ -28,7 +28,7 @@ export function registerSteamLibraryListTool(server: McpServer, context: SteamMc
     'steam_library_list',
     {
       title: 'Steam library list',
-      description: 'List local Steam games with optional store and deck enrichment.',
+      description: 'List local Steam games with store metadata and optional deck enrichment.',
       inputSchema: steamLibraryListInputSchema
     },
     async (rawArgs) => {
@@ -37,6 +37,7 @@ export function registerSteamLibraryListTool(server: McpServer, context: SteamMc
       const effectiveIgnoreGroups = uniqueCollectionNames([...config.defaultIgnoreGroups, ...(args.ignoreGroups ?? [])]);
       const effectiveArgs = {
         ...args,
+        includeStoreMetadata: true,
         ignoreGroups: effectiveIgnoreGroups
       };
       const result = await context.libraryService.list(effectiveArgs);
