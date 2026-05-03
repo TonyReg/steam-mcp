@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -72,17 +73,34 @@ export async function rewriteCloudstorageAsPairArray(sourcePath: string): Promis
     throw new Error(`Expected object-shaped cloudstorage fixture at ${sourcePath}.`);
   }
 
+  const namespaceVersion = await readNamespaceVersion(sourcePath);
   const entries = Object.entries(parsed).map(([key, value]) => [
     key,
     {
       key,
       timestamp: 1,
       value: JSON.stringify(buildLiveStylePayload(key, value)),
-      version: '1'
+      version: namespaceVersion
     }
   ]);
 
   await writeFile(sourcePath, `${JSON.stringify(entries, null, 2)}\n`, 'utf8');
+}
+
+async function readNamespaceVersion(sourcePath: string): Promise<string> {
+  const namespacePath = path.join(path.dirname(sourcePath), 'cloud-storage-namespaces.json');
+
+  try {
+    const parsed = JSON.parse(await readFile(namespacePath, 'utf8')) as unknown;
+    if (!Array.isArray(parsed)) {
+      return '1';
+    }
+
+    const namespaceEntry = parsed.find((entry) => Array.isArray(entry) && entry[0] === 1 && typeof entry[1] === 'string');
+    return Array.isArray(namespaceEntry) && typeof namespaceEntry[1] === 'string' ? namespaceEntry[1] : '1';
+  } catch {
+    return '1';
+  }
 }
 
 export async function readPairArrayDocument(sourcePath: string): Promise<Array<[string, unknown]>> {

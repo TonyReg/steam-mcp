@@ -9,6 +9,7 @@ export interface MaterializedSteamFixture {
   secondaryLibraryDir: string;
   stateDir: string;
   steamId: string;
+  cloudStorageDir: string;
   env: NodeJS.ProcessEnv;
 }
 
@@ -18,6 +19,7 @@ export async function materializeSteamFixture(repoRoot: string, enableWrites = f
   const installDir = path.join(rootDir, 'install');
   const secondaryLibraryDir = path.join(rootDir, 'secondary-library');
   const stateDir = path.join(rootDir, 'state');
+  const cloudStorageDir = path.join(installDir, 'userdata', '76561198000000000', 'config', 'cloudstorage');
 
   await mkdir(rootDir, { recursive: true });
   await cp(path.join(fixtureRoot, 'install'), installDir, { recursive: true });
@@ -38,6 +40,7 @@ export async function materializeSteamFixture(repoRoot: string, enableWrites = f
     secondaryLibraryDir,
     stateDir,
     steamId: '76561198000000000',
+    cloudStorageDir,
     env: {
       ...process.env,
       LOCALAPPDATA: rootDir,

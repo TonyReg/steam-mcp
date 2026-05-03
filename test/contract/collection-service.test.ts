@@ -18,12 +18,13 @@ import {
 import { readPairArrayDocument, readPairArrayPayload, rewriteCloudstorageAsPairArray } from '../support/cloudstorage-shape.js';
 import { materializeSteamFixture } from '../support/fixture-steam.js';
 
-test('collection service writes backup-first, keeps favorites read-only, and preserves read-only groups', async () => {
+async function createCollectionServiceHarness(enableWrites = true) {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
-  const fixture = await materializeSteamFixture(repoRoot, true);
+  const fixture = await materializeSteamFixture(repoRoot, enableWrites);
   const configService = new ConfigService(fixture.env);
   const discovery = new SteamDiscoveryService(configService.resolve());
-  const sourcePath = path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json');
+  const sourcePath = path.join(fixture.cloudStorageDir, 'cloud-storage-namespace-1.json');
+  const namespacePath = path.join(fixture.cloudStorageDir, 'cloud-storage-namespaces.json');
   const backend = new CloudStorageJsonCollectionBackend(sourcePath, fixture.steamId);
   const registry = new CollectionBackendRegistry([backend]);
   const library = new LibraryService(
@@ -33,14 +34,30 @@ test('collection service writes backup-first, keeps favorites read-only, and pre
     new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
     new LinkService()
   );
-  const collectionService = new CollectionService(
+
+  return {
+    fixture,
     configService,
     discovery,
+    sourcePath,
+    namespacePath,
+    backend,
     registry,
     library,
-    new SearchService(),
-    new SafetyService(async () => false)
-  );
+    createCollectionService: (safetyService = new SafetyService(async () => false)) => new CollectionService(
+      configService,
+      discovery,
+      registry,
+      library,
+      new SearchService(),
+      safetyService
+    )
+  };
+}
+
+test('collection service writes backup-first, keeps favorites read-only, and preserves read-only groups', async () => {
+  const harness = await createCollectionServiceHarness();
+  const collectionService = harness.createCollectionService();
 
   const preview = await collectionService.createPlan({
     mode: 'merge',
@@ -57,7 +74,7 @@ test('collection service writes backup-first, keeps favorites read-only, and pre
   assert.equal(result.appliedOperationCount, 1);
   assert.ok(result.backupPath);
 
-  const updated = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>;
+  const updated = JSON.parse(await readFile(harness.sourcePath, 'utf8')) as Record<string, unknown>;
   assert.equal((updated['unrelated-section'] as { preserve: boolean }).preserve, true);
   assert.deepEqual(updated['user-collections.favorite'], ['620']);
 
@@ -72,30 +89,12 @@ test('collection service writes backup-first, keeps favorites read-only, and pre
 });
 
 test('collection service preserves live-style pair-array documents and ignored-group memberships', async () => {
-  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
-  const fixture = await materializeSteamFixture(repoRoot, true);
-  const configService = new ConfigService(fixture.env);
-  const discovery = new SteamDiscoveryService(configService.resolve());
-  const sourcePath = path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json');
-  await rewriteCloudstorageAsPairArray(sourcePath);
-
-  const backend = new CloudStorageJsonCollectionBackend(sourcePath, fixture.steamId);
-  const registry = new CollectionBackendRegistry([backend]);
-  const library = new LibraryService(
-    discovery,
-    registry,
-    new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
-    new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
-    new LinkService()
-  );
-  const collectionService = new CollectionService(
-    configService,
-    discovery,
-    registry,
-    library,
-    new SearchService(),
-    new SafetyService(async () => false)
-  );
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const collectionService = harness.createCollectionService();
+  const beforeNamespaces = JSON.parse(await readFile(harness.namespacePath, 'utf8')) as Array<[number, string]>;
+  const beforeCoopEntry = (await readPairArrayDocument(harness.sourcePath)).find(([key]) => key === 'user-collections.uc-co-op');
+  assert.equal(beforeCoopEntry, undefined);
 
   const preview = await collectionService.createPlan({
     mode: 'merge',
@@ -111,7 +110,7 @@ test('collection service preserves live-style pair-array documents and ignored-g
   const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
   assert.equal(result.appliedOperationCount, 1);
 
-  const updated = await readPairArrayDocument(sourcePath);
+  const updated = await readPairArrayDocument(harness.sourcePath);
   const unrelated = readPairArrayPayload(updated, 'unrelated-section') as { preserve: boolean };
   assert.equal(unrelated.preserve, true);
   assert.deepEqual(updated.map(([key]) => key), [
@@ -151,6 +150,80 @@ test('collection service preserves live-style pair-array documents and ignored-g
   assert.equal(coop.name, 'Co-op');
   assert.deepEqual(coop.added, [620]);
   assert.deepEqual(coop.removed, []);
+
+  const wrappedCoop = updated.find(([key]) => key === 'user-collections.uc-co-op')?.[1] as Record<string, unknown> | undefined;
+  assert.ok(wrappedCoop);
+  assert.equal(typeof wrappedCoop.timestamp, 'number');
+  assert.equal(wrappedCoop.version, '1417');
+
+  const namespaces = JSON.parse(await readFile(harness.namespacePath, 'utf8')) as Array<[number, string]>;
+  assert.deepEqual(beforeNamespaces, [[1, '1416'], [3, '0']]);
+  assert.deepEqual(namespaces, [[1, '1417'], [3, '0']]);
+});
+
+test('collection service bumps wrapped entry metadata and namespace counter only when wrapped payload changes', async () => {
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const collectionService = harness.createCollectionService();
+
+  const beforeDocument = await readPairArrayDocument(harness.sourcePath);
+  const beforePuzzleWrapper = beforeDocument.find(([key]) => key === 'user-collections.uc-puzzle')?.[1] as Record<string, unknown>;
+  const beforeNamespaces = JSON.parse(await readFile(harness.namespacePath, 'utf8')) as Array<[number, string]>;
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Puzzle']
+      }
+    ]
+  });
+
+  await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+
+  const updated = await readPairArrayDocument(harness.sourcePath);
+  const puzzleWrapper = updated.find(([key]) => key === 'user-collections.uc-puzzle')?.[1] as Record<string, unknown>;
+  assert.ok(puzzleWrapper);
+  assert.equal(typeof puzzleWrapper.timestamp, 'number');
+  assert.equal(puzzleWrapper.version, '1417');
+  assert.ok(Number(puzzleWrapper.timestamp) >= Number(beforePuzzleWrapper.timestamp));
+
+  const puzzle = readPairArrayPayload(updated, 'user-collections.uc-puzzle') as { name: string; added: number[]; removed: number[]; description?: string };
+  assert.equal(puzzle.name, 'Puzzle');
+  assert.deepEqual(puzzle.added, [440, 620]);
+  assert.deepEqual(puzzle.removed, []);
+  assert.equal(puzzle.description, undefined);
+
+  const namespaces = JSON.parse(await readFile(harness.namespacePath, 'utf8')) as Array<[number, string]>;
+  assert.deepEqual(beforeNamespaces, [[1, '1416'], [3, '0']]);
+  assert.deepEqual(namespaces, [[1, '1417'], [3, '0']]);
+});
+
+test('collection service leaves wrapped metadata and namespace counter unchanged on no-op apply', async () => {
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const collectionService = harness.createCollectionService();
+
+  const beforeDocumentText = await readFile(harness.sourcePath, 'utf8');
+  const beforeNamespacesText = await readFile(harness.namespacePath, 'utf8');
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [620],
+        addToCollections: ['Puzzle']
+      }
+    ]
+  });
+
+  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  assert.equal(result.appliedOperationCount, 1);
+  assert.equal(result.backupPath, undefined);
+  assert.equal(result.rollbackPath, undefined);
+  assert.equal(await readFile(harness.sourcePath, 'utf8'), beforeDocumentText);
+  assert.equal(await readFile(harness.namespacePath, 'utf8'), beforeNamespacesText);
 });
 
 test('collection service ignores legacy favorite operations during apply', async () => {
@@ -330,6 +403,59 @@ test('collection service excludes ignored-group games from query rules', async (
   assert.deepEqual(preview.plan.operations, {});
 });
 
+test('collection service query rules match store tags when store metadata is available', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  const appDetailsPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-620.json'), 'utf8');
+  const configService = new ConfigService(fixture.env);
+  const discovery = new SteamDiscoveryService(configService.resolve());
+  const sourcePath = path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json');
+  const backend = new CloudStorageJsonCollectionBackend(sourcePath, fixture.steamId);
+  const registry = new CollectionBackendRegistry([backend]);
+  const library = new LibraryService(
+    discovery,
+    registry,
+    new StoreClient(async (input) => {
+      const url = new URL(String(input));
+      if (url.searchParams.get('appids') === '620') {
+        return new Response(appDetailsPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+      }
+
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }),
+    new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new LinkService()
+  );
+  const collectionService = new CollectionService(
+    configService,
+    discovery,
+    registry,
+    library,
+    new SearchService(),
+    new SafetyService(async () => false)
+  );
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        query: 'co-op',
+        addToCollections: ['Backlog']
+      }
+    ]
+  });
+
+  assert.deepEqual(preview.matchedGames.map((game) => game.appId), [620]);
+  assert.equal(preview.matchedGames[0]?.name, 'Portal 2');
+  assert.deepEqual((preview.matchedGames[0]?.tags ?? []).slice().sort((left, right) => left.localeCompare(right)), ['Co-op', 'Puzzle']);
+  assert.deepEqual(preview.plan.operations, {
+    '620': {
+      appId: 620,
+      collectionsToAdd: ['Backlog']
+    }
+  });
+});
+
 test('collection service rejects non-UUID plan identifiers', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
@@ -356,6 +482,43 @@ test('collection service rejects non-UUID plan identifiers', async () => {
 
   await assert.rejects(() => collectionService.readPlan('../escape'), /planId must be a UUID/);
   await assert.rejects(() => collectionService.applyPlan('../escape', { dryRun: true }), /planId must be a UUID/);
+});
+
+test('collection service rolls back both cloudstorage files when namespace write fails', async () => {
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+
+  class FailingSafetyService extends SafetyService {
+    override async atomicWrite(targetPath: string, content: string): Promise<void> {
+      if (path.basename(targetPath).toLowerCase() === 'cloud-storage-namespaces.json') {
+        throw new Error('namespace write failed');
+      }
+
+      await super.atomicWrite(targetPath, content);
+    }
+  }
+
+  const collectionService = harness.createCollectionService(new FailingSafetyService(async () => false));
+  const beforeDocumentText = await readFile(harness.sourcePath, 'utf8');
+  const beforeNamespacesText = await readFile(harness.namespacePath, 'utf8');
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Puzzle']
+      }
+    ]
+  });
+
+  await assert.rejects(
+    () => collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true }),
+    /namespace write failed/
+  );
+
+  assert.equal(await readFile(harness.sourcePath, 'utf8'), beforeDocumentText);
+  assert.equal(await readFile(harness.namespacePath, 'utf8'), beforeNamespacesText);
 });
 
 test('collection service rejects write targets outside the selected Steam cloudstorage directory', async () => {
