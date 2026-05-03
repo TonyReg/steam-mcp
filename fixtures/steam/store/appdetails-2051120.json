@@ -1,0 +1,32 @@
+{
+  "2051120": {
+    "success": true,
+    "data": {
+      "name": "HOT WHEELS UNLEASHED™ 2 - Turbocharged",
+      "developers": [
+        "Milestone S.r.l."
+      ],
+      "publishers": [
+        "Milestone S.r.l."
+      ],
+      "genres": [
+        {
+          "id": "9",
+          "description": "Racing"
+        }
+      ],
+      "categories": [
+        {
+          "id": 2,
+          "description": "Single-player"
+        }
+      ],
+      "tags": [
+        "Racing",
+        "Arcade"
+      ],
+      "short_description": "Race toy cars at full speed.",
+      "header_image": "https://cdn.example/hw2.jpg"
+    }
+  }
+}
