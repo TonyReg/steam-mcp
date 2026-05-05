@@ -12,7 +12,7 @@
 - Export results as JSON or Markdown with `steam_export`
 - Generate `steam://` and web links with `steam_link_generate`
 - Preview collection and hidden-state changes with `steam_collection_plan`
-- Apply a reviewed collection plan with `steam_collection_apply` when writes are explicitly enabled
+- Apply a reviewed collection plan with `steam_collection_apply` when writes are explicitly enabled, including an experimental JSON-only two-stage cloudstorage flow
 
 ## Safety model
 
@@ -21,6 +21,9 @@
 - Steam-owned writes stay disabled unless `STEAM_ENABLE_COLLECTION_WRITES=1`
 - `steam_collection_plan` creates durable preview plans under MCP-owned state without mutating Steam-owned data
 - Apply is backup-first, drift-checked, rollback-capable, and requires Steam to be closed by default
+- Experimental staged sync is JSON-only for cloudstorage files: `cloud-storage-namespace-1.json`, `cloud-storage-namespace-1.modified.json`, and `cloud-storage-namespaces.json`
+- Experimental staged sync currently requires pair-array cloudstorage format and rejects object-shaped cloudstorage documents
+- Experimental dirty and finalize calls each create backups for the files touched in that invocation
 
 ## Quick start
 
@@ -96,7 +99,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 | `steam_store_search` | Search the public Steam store without authenticated session reuse |
 | `steam_find_similar` | Rank similar library or store candidates deterministically |
 | `steam_collection_plan` | Create a durable preview plan for collection or hidden-state changes |
-| `steam_collection_apply` | Apply a previously generated plan when writes are enabled |
+| `steam_collection_apply` | Apply a previously generated plan when writes are enabled, with an experimental JSON-only dirty/finalize cloudstorage mode |
 | `steam_export` | Render library or plan data as JSON or Markdown |
 | `steam_link_generate` | Generate store, community, library, and launch links |
 
@@ -106,6 +109,9 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 - The project is Windows-first and assumes a local Steam installation
 - Steam store and Steam Deck data are used as read-only enrichment sources
 - Collection changes should follow the plan-first flow: preview with `steam_collection_plan`, then apply only after explicit confirmation and with writes enabled
+- Experimental collection sync is explicitly limited to cloudstorage JSON files; it does not modify `localconfig.vdf`, LevelDB, `sharedconfig.vdf`, or undocumented Steam APIs
+- Experimental `steam_collection_apply` semantics are: omit `experimentalFinalize` for existing one-shot behavior, pass `false` for stage-1 dirty apply, and pass `true` for stage-2 finalize
+- Experimental staged calls also require Steam to stay closed; staged calls reject `requireSteamClosed=false`
 
 ## More docs
 

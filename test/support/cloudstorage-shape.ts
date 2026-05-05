@@ -118,6 +118,38 @@ export async function readPairArrayDocument(sourcePath: string): Promise<Array<[
   });
 }
 
+export function readPairArrayWrapper(entries: Array<[string, unknown]>, key: string): Record<string, unknown> {
+  const entry = entries.find(([entryKey]) => entryKey === key);
+  if (!entry) {
+    throw new Error(`Missing pair-array entry for ${key}.`);
+  }
+
+  if (!isRecord(entry[1])) {
+    throw new Error(`Expected wrapped pair-array entry for ${key}.`);
+  }
+
+  return entry[1];
+}
+
+export async function readModifiedKeys(sourcePath: string): Promise<string[]> {
+  const modifiedPath = path.join(path.dirname(sourcePath), 'cloud-storage-namespace-1.modified.json');
+
+  try {
+    const parsed = JSON.parse(await readFile(modifiedPath, 'utf8')) as unknown;
+    if (!Array.isArray(parsed)) {
+      throw new Error(`Expected modified key array at ${modifiedPath}.`);
+    }
+
+    return parsed.flatMap((entry) => typeof entry === 'string' ? [entry] : []);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+
+    throw error;
+  }
+}
+
 export function readPairArrayPayload(entries: Array<[string, unknown]>, key: string): unknown {
   const entry = entries.find(([entryKey]) => entryKey === key);
   if (!entry) {
