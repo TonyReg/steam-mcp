@@ -55,6 +55,7 @@ export interface CollectionPlan {
   warnings: string[];
   sourceRequest?: string;
   planPath: string;
+  expectedDirtySnapshotHash?: string;
 }
 
 export interface CollectionSnapshot {
@@ -98,6 +99,7 @@ export interface CollectionPlanPreview {
 export interface CollectionApplyOptions {
   dryRun?: boolean;
   requireSteamClosed?: boolean;
+  experimentalFinalize?: boolean;
 }
 
 export interface CollectionApplyResult {

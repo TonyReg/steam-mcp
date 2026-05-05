@@ -1,4 +1,4 @@
-import type { CollectionPlan, CollectionSnapshot } from '../types.js';
+import type { CollectionApplyOptions, CollectionPlan, CollectionSnapshot } from '../types.js';
 
 export interface CollectionBackendFileWrite {
   targetPath: string;
@@ -6,8 +6,11 @@ export interface CollectionBackendFileWrite {
 }
 
 export interface CollectionBackendApplyDraft {
-  writes: CollectionBackendFileWrite[];
-  expectedSnapshotHash: string;
+  dirtyWrites: CollectionBackendFileWrite[];
+  finalizeWrites: CollectionBackendFileWrite[];
+  expectedDirtySnapshotHash?: string;
+  expectedFinalSnapshotHash: string;
+  finalizeWarnings?: string[];
 }
 
 export interface CollectionBackendAdapter {
@@ -15,5 +18,5 @@ export interface CollectionBackendAdapter {
   detect(): Promise<boolean>;
   readSnapshot(): Promise<CollectionSnapshot>;
   validatePlan(plan: CollectionPlan, snapshot: CollectionSnapshot): string[];
-  applyPlan(plan: CollectionPlan, snapshot: CollectionSnapshot): Promise<CollectionBackendApplyDraft>;
+  applyPlan(plan: CollectionPlan, snapshot: CollectionSnapshot, options?: CollectionApplyOptions): Promise<CollectionBackendApplyDraft>;
 }
