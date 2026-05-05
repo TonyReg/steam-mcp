@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile as execFileCallback } from 'node:child_process';
@@ -6,10 +6,14 @@ import { promisify } from 'node:util';
 import { ensurePathInsideRoot, normalizeAbsolutePath } from '../utils.js';
 
 const execFile = promisify(execFileCallback);
-const COLLECTION_FILE_NAMES = new Set(['cloud-storage-namespace-1.json', 'cloud-storage-namespaces.json']);
+const COLLECTION_FILE_NAMES = new Set(['cloud-storage-namespace-1.json', 'cloud-storage-namespace-1.modified.json', 'cloud-storage-namespaces.json']);
 
 export class SafetyService {
   constructor(private readonly steamRunningDetector?: () => Promise<boolean>) {}
+
+  protected async resolveCanonicalPath(targetPath: string): Promise<string> {
+    return normalizeAbsolutePath(await realpath(normalizeAbsolutePath(targetPath)));
+  }
 
   async isSteamRunning(): Promise<boolean> {
     if (this.steamRunningDetector) {
@@ -38,10 +42,20 @@ export class SafetyService {
     return backupPath;
   }
 
-  async createBackups(sourcePaths: string[], backupsDir: string): Promise<Record<string, string>> {
+  async createBackups(sourcePaths: string[], backupsDir: string): Promise<Record<string, string | null>> {
     const backups = await Promise.all(sourcePaths.map(async (sourcePath) => {
-      const backupPath = await this.createBackup(sourcePath, backupsDir);
-      return [normalizeAbsolutePath(sourcePath), backupPath] as const;
+      const normalizedSourcePath = normalizeAbsolutePath(sourcePath);
+
+      try {
+        const backupPath = await this.createBackup(normalizedSourcePath, backupsDir);
+        return [normalizedSourcePath, backupPath] as const;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw error;
+        }
+
+        return [normalizedSourcePath, null] as const;
+      }
     }));
 
     return Object.fromEntries(backups);
@@ -54,30 +68,65 @@ export class SafetyService {
     await rename(tempPath, normalizedTargetPath);
   }
 
-  async atomicWriteMany(writes: Array<{ targetPath: string; content: string }>): Promise<void> {
-    for (const write of writes) {
-      await this.atomicWrite(write.targetPath, write.content);
+  async atomicWriteMany(writes: Array<{ targetPath: string; content: string }>): Promise<string[]> {
+    const writtenTargetPaths: string[] = [];
+
+    try {
+      for (const write of writes) {
+        await this.atomicWrite(write.targetPath, write.content);
+        writtenTargetPaths.push(normalizeAbsolutePath(write.targetPath));
+      }
+    } catch (error) {
+      (error as Error & { writtenTargetPaths?: string[] }).writtenTargetPaths = writtenTargetPaths;
+      throw error;
     }
+
+    return writtenTargetPaths;
   }
 
-  async rollback(targetPath: string, backupPath: string): Promise<void> {
+  async rollback(targetPath: string, backupPath: string | null, writtenTargetPaths?: Set<string>): Promise<void> {
+    const normalizedTargetPath = normalizeAbsolutePath(targetPath);
+
+    if (backupPath === null) {
+      if (!writtenTargetPaths?.has(normalizedTargetPath)) {
+        return;
+      }
+
+      await rm(normalizedTargetPath, { force: true });
+      return;
+    }
+
     const content = await readFile(normalizeAbsolutePath(backupPath), 'utf8');
-    await this.atomicWrite(normalizeAbsolutePath(targetPath), content);
+    await this.atomicWrite(normalizedTargetPath, content);
   }
 
-  async rollbackMany(backupsByTargetPath: Record<string, string>): Promise<void> {
+  async rollbackMany(backupsByTargetPath: Record<string, string | null>, writtenTargetPaths?: Iterable<string>): Promise<void> {
+    const normalizedWrittenTargetPaths = writtenTargetPaths ? new Set([...writtenTargetPaths].map((targetPath) => normalizeAbsolutePath(targetPath))) : undefined;
+    const rollbackErrors: Error[] = [];
+
     for (const [targetPath, backupPath] of Object.entries(backupsByTargetPath)) {
-      await this.rollback(targetPath, backupPath);
+      try {
+        await this.rollback(targetPath, backupPath, normalizedWrittenTargetPaths);
+      } catch (error) {
+        rollbackErrors.push(error as Error);
+      }
+    }
+
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(rollbackErrors, `Collection rollback failed for ${rollbackErrors.length} target(s).`);
     }
   }
 
-  assertCollectionWriteTarget(targetPath: string, selectedUserDir: string): string {
+  async assertCollectionWriteTarget(targetPath: string, selectedUserDir: string): Promise<string> {
     const normalizedUserDir = normalizeAbsolutePath(selectedUserDir);
+    const canonicalUserDir = await this.resolveCanonicalPath(normalizedUserDir);
     const expectedDirectory = ensurePathInsideRoot(
       path.join(normalizedUserDir, 'config', 'cloudstorage'),
       normalizedUserDir,
       'Steam cloudstorage directory'
     );
+    const canonicalExpectedDirectory = await this.resolveCanonicalPath(expectedDirectory);
+    ensurePathInsideRoot(canonicalExpectedDirectory, canonicalUserDir, 'Steam cloudstorage directory real path');
     const normalizedTargetPath = ensurePathInsideRoot(targetPath, expectedDirectory, 'Steam collection target');
     const targetFileName = path.basename(normalizedTargetPath).toLowerCase();
 
@@ -85,10 +134,12 @@ export class SafetyService {
       throw new Error(`Steam collection writes are limited to ${[...COLLECTION_FILE_NAMES].join(', ')}.`);
     }
 
-    return normalizedTargetPath;
+    const canonicalTargetDirectory = await this.resolveCanonicalPath(path.dirname(normalizedTargetPath));
+    ensurePathInsideRoot(canonicalTargetDirectory, canonicalExpectedDirectory, 'Steam collection target real path');
+    return normalizeAbsolutePath(path.join(canonicalTargetDirectory, path.basename(normalizedTargetPath)));
   }
 
-  assertCollectionWriteTargets(targetPaths: string[], selectedUserDir: string): string[] {
-    return targetPaths.map((targetPath) => this.assertCollectionWriteTarget(targetPath, selectedUserDir));
+  async assertCollectionWriteTargets(targetPaths: string[], selectedUserDir: string): Promise<string[]> {
+    return Promise.all(targetPaths.map((targetPath) => this.assertCollectionWriteTarget(targetPath, selectedUserDir)));
   }
 }

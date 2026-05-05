@@ -6,6 +6,12 @@ import type { CollectionBackendAdapter, CollectionBackendApplyDraft } from '../.
 
 type CloudStorageDocument = Record<string, unknown>;
 type CloudStorageDocumentFormat = 'object' | 'pair-array';
+type WrappedVersionMode = 'current' | 'dirty' | 'final';
+
+interface SerializeDocumentOptions {
+  wrappedVersionMode?: WrappedVersionMode;
+  forceWrappedKeys?: Set<string>;
+}
 
 const RESERVED_DOCUMENT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -62,32 +68,166 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
     return warnings;
   }
 
-  async applyPlan(plan: CollectionPlan, snapshot: CollectionSnapshot): Promise<CollectionBackendApplyDraft> {
+  async applyPlan(plan: CollectionPlan, snapshot: CollectionSnapshot, options: { experimentalFinalize?: boolean } = {}): Promise<CollectionBackendApplyDraft> {
     const parsedDocument = await this.readDocument();
+    if (options.experimentalFinalize !== undefined && parsedDocument.format !== 'pair-array') {
+      throw new Error('Experimental staged collection sync requires pair-array cloudstorage format.');
+    }
+
     const nextDocument = updateDocument(parsedDocument.document, plan, snapshot);
     const nextSnapshot = buildSnapshot(nextDocument, this.sourcePath, this.steamId, this.backendId);
     const documentChanged = stableStringify(nextDocument) !== stableStringify(parsedDocument.document);
     const namespacePath = resolveNamespaceMetadataPath(this.sourcePath);
+    const modifiedPath = resolveModifiedMetadataPath(this.sourcePath);
     const parsedNamespaces = await this.readNamespacesDocument(namespacePath);
     const currentNamespaceValue = parsedNamespaces.valueByNamespace.get(COLLECTION_NAMESPACE_ID);
-    const nextNamespaceValue = documentChanged ? bumpNamespaceValue(currentNamespaceValue) : currentNamespaceValue;
-    const writes = documentChanged
-      ? [{
-          targetPath: this.sourcePath,
-          content: serializeDocument(nextDocument, parsedDocument.format, parsedDocument.keyOrder, parsedDocument.document, nextNamespaceValue)
-        }]
-      : [];
 
-    if (nextNamespaceValue !== undefined && nextNamespaceValue !== currentNamespaceValue) {
-      writes.push({
-        targetPath: namespacePath,
-        content: serializeNamespacesDocument(updateNamespacesDocument(parsedNamespaces.values, nextNamespaceValue))
-      });
+    if (options.experimentalFinalize === undefined) {
+      const nextNamespaceValue = documentChanged ? bumpNamespaceValue(currentNamespaceValue) : currentNamespaceValue;
+      const writes = documentChanged
+        ? [{
+            targetPath: this.sourcePath,
+            content: serializeDocument(parsedDocument.document, nextDocument, parsedDocument.format, parsedDocument.keyOrder, nextNamespaceValue)
+          }]
+        : [];
+
+      if (nextNamespaceValue !== undefined && nextNamespaceValue !== currentNamespaceValue) {
+        writes.push({
+          targetPath: namespacePath,
+          content: serializeNamespacesDocument(updateNamespacesDocument(parsedNamespaces.values, nextNamespaceValue))
+        });
+      }
+
+      return {
+        dirtyWrites: writes,
+        finalizeWrites: [],
+        expectedDirtySnapshotHash: nextSnapshot.snapshotHash,
+        expectedFinalSnapshotHash: nextSnapshot.snapshotHash
+      };
     }
 
+    if (options.experimentalFinalize === false) {
+      if (!documentChanged) {
+        return {
+          dirtyWrites: [],
+          finalizeWrites: [],
+          expectedDirtySnapshotHash: nextSnapshot.snapshotHash,
+          expectedFinalSnapshotHash: nextSnapshot.snapshotHash
+        };
+      }
+
+      const nextNamespaceValue = currentNamespaceValue === undefined ? '1' : bumpNamespaceValue(currentNamespaceValue);
+      const modifiedKeys = resolveModifiedCollectionKeys(parsedDocument.document, nextDocument);
+      const forcedWrappedKeys = new Set(modifiedKeys);
+      const nextNamespacesDocument = updateNamespacesDocument(parsedNamespaces.values, nextNamespaceValue);
+      const namespaceChanged = stableStringify(nextNamespacesDocument) !== stableStringify(parsedNamespaces.values);
+      const dirtyWrites = modifiedKeys.length === 0
+        ? []
+        : [
+            {
+              targetPath: this.sourcePath,
+              content: serializeDocument(parsedDocument.document, nextDocument, parsedDocument.format, parsedDocument.keyOrder, nextNamespaceValue, {
+                wrappedVersionMode: 'dirty',
+                forceWrappedKeys: forcedWrappedKeys
+              })
+            },
+            {
+              targetPath: modifiedPath,
+              content: serializeModifiedKeysDocument(modifiedKeys)
+            },
+            ...(namespaceChanged
+              ? [{
+                  targetPath: namespacePath,
+                  content: serializeNamespacesDocument(nextNamespacesDocument)
+                }]
+              : [])
+          ];
+      const finalizeWrites = modifiedKeys.length === 0
+        ? []
+        : [
+            {
+              targetPath: this.sourcePath,
+              content: serializeDocument(nextDocument, nextDocument, parsedDocument.format, parsedDocument.keyOrder, nextNamespaceValue, {
+                wrappedVersionMode: 'final',
+                forceWrappedKeys: forcedWrappedKeys
+              })
+            },
+            {
+              targetPath: modifiedPath,
+              content: serializeModifiedKeysDocument([])
+            },
+            {
+              targetPath: namespacePath,
+              content: serializeNamespacesDocument(nextNamespacesDocument)
+            }
+          ];
+
+      return {
+        dirtyWrites,
+        finalizeWrites,
+        expectedDirtySnapshotHash: nextSnapshot.snapshotHash,
+        expectedFinalSnapshotHash: nextSnapshot.snapshotHash,
+        finalizeWarnings: modifiedKeys.length === 0 ? undefined : ['Experimental JSON-only stage 1 applied; pending finalize with experimentalFinalize=true.']
+      };
+    }
+
+    const modifiedKeys = await readModifiedKeysDocument(modifiedPath);
+    const forcedWrappedKeys = new Set(modifiedKeys);
+    const dirtyWrappedKeys = resolveDirtyWrappedCollectionKeys(parsedDocument.document);
+    if (modifiedKeys.length === 0) {
+      if (dirtyWrappedKeys.length > 0) {
+        throw new Error(`Experimental finalize cannot continue because staged state appears corrupted: modified sidecar is empty while dirty wrapped entries remain (${dirtyWrappedKeys.join(', ')}).`);
+      }
+
+      return {
+        dirtyWrites: [],
+        finalizeWrites: [],
+        expectedFinalSnapshotHash: snapshot.snapshotHash
+      };
+    }
+
+    if (currentNamespaceValue === undefined) {
+      throw new Error('Experimental finalize cannot continue because namespace metadata is missing for a dirty staged state.');
+    }
+
+    const finalizedNamespaceValue = validateFinalizedNamespaceValue(currentNamespaceValue);
+
+    const normalizedModifiedKeys = uniqueStrings(modifiedKeys);
+    const normalizedDirtyWrappedKeys = uniqueStrings(dirtyWrappedKeys);
+    if (
+      normalizedModifiedKeys.length !== normalizedDirtyWrappedKeys.length
+      || normalizedModifiedKeys.some((key, index) => key !== normalizedDirtyWrappedKeys[index])
+    ) {
+      throw new Error(
+        `Experimental finalize cannot continue because staged state appears corrupted: modified sidecar keys (${normalizedModifiedKeys.join(', ')}) do not match dirty wrapped entries (${normalizedDirtyWrappedKeys.join(', ')}).`
+      );
+    }
+
+    const nextNamespacesDocument = updateNamespacesDocument(parsedNamespaces.values, finalizedNamespaceValue);
+    const namespaceChanged = stableStringify(nextNamespacesDocument) !== stableStringify(parsedNamespaces.values);
+
     return {
-      writes,
-      expectedSnapshotHash: nextSnapshot.snapshotHash
+      dirtyWrites: [],
+      finalizeWrites: [
+        {
+          targetPath: this.sourcePath,
+          content: serializeDocument(parsedDocument.document, nextDocument, parsedDocument.format, parsedDocument.keyOrder, finalizedNamespaceValue, {
+            wrappedVersionMode: 'final',
+            forceWrappedKeys: forcedWrappedKeys
+          })
+        },
+        {
+          targetPath: modifiedPath,
+          content: serializeModifiedKeysDocument([])
+        },
+        ...(namespaceChanged
+          ? [{
+              targetPath: namespacePath,
+              content: serializeNamespacesDocument(nextNamespacesDocument)
+            }]
+          : [])
+      ],
+      expectedFinalSnapshotHash: nextSnapshot.snapshotHash
     };
   }
 
@@ -175,11 +315,12 @@ function normalizeNamespacesDocument(parsed: unknown, sourcePath: string): Parse
 }
 
 function serializeDocument(
+  previousDocument: CloudStorageDocument,
   document: CloudStorageDocument,
   format: CloudStorageDocumentFormat,
   keyOrder: string[],
-  previousDocument: CloudStorageDocument = createCloudStorageDocument(),
-  nextNamespaceValue?: string
+  nextNamespaceValue?: string,
+  options: SerializeDocumentOptions = {}
 ): string {
   if (format === 'object') {
     return `${JSON.stringify(document, null, 2)}\n`;
@@ -190,14 +331,14 @@ function serializeDocument(
 
   for (const key of keyOrder) {
     if (Object.hasOwn(document, key)) {
-      entries.push([key, wrapPairArrayValue(key, document[key], previousDocument[key], nextNamespaceValue)]);
+      entries.push([key, wrapPairArrayValue(key, document[key], previousDocument[key], nextNamespaceValue, options)]);
       seen.add(key);
     }
   }
 
   for (const key of Object.keys(document)) {
     if (!seen.has(key)) {
-      entries.push([key, wrapPairArrayValue(key, document[key], previousDocument[key], nextNamespaceValue)]);
+      entries.push([key, wrapPairArrayValue(key, document[key], previousDocument[key], nextNamespaceValue, options)]);
     }
   }
 
@@ -245,7 +386,8 @@ function wrapPairArrayValue(
   key: string,
   value: unknown,
   previousValue?: unknown,
-  nextNamespaceValue?: string
+  nextNamespaceValue?: string,
+  options: SerializeDocumentOptions = {}
 ): unknown {
   if (!key.startsWith('user-collections.')) {
     return value;
@@ -254,19 +396,22 @@ function wrapPairArrayValue(
   const payload = buildPairArrayPayload(key, value);
   const nextValue = JSON.stringify(payload);
 
+  const wrappedVersionMode = options.wrappedVersionMode ?? 'current';
+  const shouldForceWrappedValue = options.forceWrappedKeys?.has(key) ?? false;
+
   if (isWrappedCloudStorageEntry(value)) {
-    if (!didCollectionPayloadChange(previousValue, value)) {
+    if (!shouldForceWrappedValue && !didCollectionPayloadChange(previousValue, value)) {
       return value;
     }
 
-    return refreshWrappedCloudStorageValue(value, nextValue, nextNamespaceValue);
+    return refreshWrappedCloudStorageValue(value, nextValue, nextNamespaceValue, wrappedVersionMode);
   }
 
   return {
     key,
     timestamp: Math.floor(Date.now() / 1000),
     value: nextValue,
-    version: nextNamespaceValue ?? '1'
+    version: wrappedVersionMode === 'dirty' ? null : nextNamespaceValue ?? '1'
   };
 }
 
@@ -512,6 +657,62 @@ function resolveNamespaceMetadataPath(sourcePath: string): string {
   return path.join(path.dirname(sourcePath), 'cloud-storage-namespaces.json');
 }
 
+function resolveModifiedMetadataPath(sourcePath: string): string {
+  return path.join(path.dirname(sourcePath), 'cloud-storage-namespace-1.modified.json');
+}
+
+async function readModifiedKeysDocument(modifiedPath: string): Promise<string[]> {
+  try {
+    const text = await readFile(modifiedPath, 'utf8');
+    const parsed = parseJson(text);
+    if (!Array.isArray(parsed)) {
+      throw new Error(`Collection modified key file ${modifiedPath} is not a supported JSON document.`);
+    }
+
+    if (!parsed.every((entry) => typeof entry === 'string')) {
+      throw new Error(`Collection modified key file ${modifiedPath} must contain only string keys.`);
+    }
+
+    return [...parsed];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+
+    throw error;
+  }
+}
+
+function serializeModifiedKeysDocument(keys: string[]): string {
+  return `${JSON.stringify(keys, null, 2)}\n`;
+}
+
+function resolveModifiedCollectionKeys(previousDocument: CloudStorageDocument, nextDocument: CloudStorageDocument): string[] {
+  const keys = new Set<string>([
+    ...Object.keys(previousDocument),
+    ...Object.keys(nextDocument)
+  ]);
+
+  return [...keys].filter((key) => {
+    if (key !== 'user-collections.hidden' && !key.startsWith('user-collections.uc-')) {
+      return false;
+    }
+
+    return didCollectionPayloadChange(previousDocument[key], nextDocument[key]);
+  });
+}
+
+function resolveDirtyWrappedCollectionKeys(document: CloudStorageDocument): string[] {
+  return Object.entries(document)
+    .flatMap(([key, value]) => {
+      if (key !== 'user-collections.hidden' && !key.startsWith('user-collections.uc-')) {
+        return [];
+      }
+
+      return isWrappedCloudStorageEntry(value) && value.version === null ? [key] : [];
+    });
+}
+
 function bumpNamespaceValue(value: string | undefined): string {
   const numericValue = Number(value ?? '0');
   if (!Number.isInteger(numericValue) || numericValue < 0) {
@@ -519,6 +720,14 @@ function bumpNamespaceValue(value: string | undefined): string {
   }
 
   return String(numericValue + 1);
+}
+
+function validateFinalizedNamespaceValue(value: string): string {
+  if (/^\d+$/.test(value)) {
+    return String(Number(value));
+  }
+
+  throw new Error(`Experimental finalize cannot continue because namespace metadata is invalid (${value}).`);
 }
 
 function updateNamespacesDocument(values: Array<[number, string]>, nextNamespaceValue: string): Array<[number, string]> {
@@ -708,9 +917,14 @@ function rewriteNamedCollectionPayload(
 function refreshWrappedCloudStorageValue(
   original: Record<string, unknown> & { key: string },
   nextValue: string,
-  nextVersion?: string
+  nextVersion?: string,
+  wrappedVersionMode: WrappedVersionMode = 'current'
 ): unknown {
-  if (original.value === nextValue && (nextVersion === undefined || original.version === nextVersion)) {
+  const resolvedVersion = wrappedVersionMode === 'dirty'
+    ? null
+    : normalizeWrappedVersion(nextVersion ?? original.version);
+
+  if (original.value === nextValue && original.version === resolvedVersion) {
     return original;
   }
 
@@ -718,7 +932,7 @@ function refreshWrappedCloudStorageValue(
     ...original,
     timestamp: Math.floor(Date.now() / 1000),
     value: nextValue,
-    version: normalizeWrappedVersion(nextVersion ?? original.version)
+    version: resolvedVersion
   };
 }
 

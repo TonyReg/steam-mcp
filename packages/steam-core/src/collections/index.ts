@@ -120,6 +120,13 @@ export class CollectionService {
       throw new Error('No writable cloudstorage-json backend is available for the selected Steam user.');
     }
 
+    if (
+      options.experimentalFinalize !== undefined
+      && options.requireSteamClosed === false
+    ) {
+      throw new Error('Experimental staged collection sync requires Steam to be closed; omit requireSteamClosed=false for dirty/finalize calls.');
+    }
+
     if (options.requireSteamClosed !== false && await this.safetyService.isSteamRunning()) {
       throw new Error('Steam appears to be running. Close Steam or set requireSteamClosed=false explicitly.');
     }
@@ -137,11 +144,14 @@ export class CollectionService {
     const persistedPlan = JSON.parse(await readFile(planPath, 'utf8')) as CollectionPlan;
     const plan = normalizePersistedPlan(persistedPlan);
     const snapshot = await backend.readSnapshot();
-    const validationWarnings = backend.validatePlan(plan, snapshot);
+    const rawValidationWarnings = backend.validatePlan(plan, snapshot);
+    const validationWarnings = rawValidationWarnings.filter((warning) => !(
+      options.experimentalFinalize === true
+      && warning === 'Snapshot hash drift detected.'
+    ));
     if (validationWarnings.length > 0) {
       throw new Error(validationWarnings.join(' '));
     }
-
     const appliedOperationCount = Object.keys(plan.operations).length;
     if (options.dryRun) {
       return {
@@ -154,44 +164,80 @@ export class CollectionService {
       };
     }
 
-    this.safetyService.assertCollectionWriteTarget(discovery.collectionSourcePath, discovery.selectedUserDir);
-    const draft = await backend.applyPlan(plan, snapshot);
-    if (draft.writes.length === 0) {
+    await this.safetyService.assertCollectionWriteTarget(discovery.collectionSourcePath, discovery.selectedUserDir);
+    const draft = await backend.applyPlan(plan, snapshot, { experimentalFinalize: options.experimentalFinalize });
+    const stageWrites = options.experimentalFinalize === true ? draft.finalizeWrites : draft.dirtyWrites;
+
+    const hasPendingFinalizeWarning = (draft.finalizeWarnings?.length ?? 0) > 0;
+    const noOpStage = stageWrites.length === 0;
+
+    if (options.experimentalFinalize === true && !noOpStage) {
+      if (!plan.expectedDirtySnapshotHash) {
+        throw new Error('Experimental finalize requires a successful dirty stage with a persisted expectedDirtySnapshotHash.');
+      }
+
+      if (snapshot.snapshotHash !== plan.expectedDirtySnapshotHash) {
+        throw new Error('Experimental finalize cannot continue because the staged snapshot drifted after dirty stage.');
+      }
+    }
+
+    const planWrite = options.experimentalFinalize === false && stageWrites.length > 0 && draft.expectedDirtySnapshotHash
+      ? {
+          targetPath: planPath,
+          content: `${JSON.stringify({
+            ...plan,
+            expectedDirtySnapshotHash: draft.expectedDirtySnapshotHash
+          } satisfies CollectionPlan, null, 2)}\n`
+        }
+      : undefined;
+
+    if (noOpStage && planWrite === undefined) {
       return {
         planId: normalizedPlanId,
         dryRun: false,
         backendId: backend.backendId,
         appliedOperationCount,
-        warnings: plan.warnings,
+        warnings: options.experimentalFinalize === true ? plan.warnings : [...plan.warnings, ...(hasPendingFinalizeWarning ? draft.finalizeWarnings ?? [] : [])],
         skipped: []
       };
     }
 
-    const targetPaths = this.safetyService.assertCollectionWriteTargets(
-      draft.writes.map((write) => write.targetPath),
-      discovery.selectedUserDir
-    );
-    if (targetPaths.length !== draft.writes.length || targetPaths[0] === undefined) {
+    const targetPaths = stageWrites.length === 0
+      ? []
+      : await this.safetyService.assertCollectionWriteTargets(
+          stageWrites.map((write) => write.targetPath),
+          discovery.selectedUserDir
+        );
+    if (stageWrites.length > 0 && (targetPaths.length !== stageWrites.length || targetPaths[0] === undefined)) {
       throw new Error('Collection backend returned an invalid write target set.');
     }
 
-    const writes = draft.writes.map((write, index) => ({
+    const writes = stageWrites.map((write, index) => ({
       ...write,
       targetPath: targetPaths[index] ?? write.targetPath
     }));
+
     const rollbackPath = targetPaths[0];
-    const backupsByTargetPath = await this.safetyService.createBackups(targetPaths, config.stateDirectories.backupsDir);
+    const backupTargets = planWrite ? [...targetPaths, planPath] : targetPaths;
+    const backupsByTargetPath = backupTargets.length === 0
+      ? {}
+      : await this.safetyService.createBackups(backupTargets, config.stateDirectories.backupsDir);
+    const writesWithPlan = planWrite ? [...writes, planWrite] : writes;
+    let writtenTargetPaths: string[] = [];
 
     try {
-      await this.safetyService.atomicWriteMany(writes);
-      await Promise.all(writes.map(async (write) => {
+      writtenTargetPaths = await this.safetyService.atomicWriteMany(writesWithPlan);
+      await Promise.all(writesWithPlan.map(async (write) => {
         const actualContent = await readFile(write.targetPath, 'utf8');
         if (actualContent !== write.content) {
           throw new Error(`Post-write verification failed because ${write.targetPath} did not match the expected content.`);
         }
       }));
       const verifySnapshot = await backend.readSnapshot();
-      if (verifySnapshot.snapshotHash !== draft.expectedSnapshotHash) {
+      const expectedSnapshotHash = options.experimentalFinalize === true
+        ? draft.expectedFinalSnapshotHash
+        : draft.expectedDirtySnapshotHash ?? draft.expectedFinalSnapshotHash;
+      if (verifySnapshot.snapshotHash !== expectedSnapshotHash) {
         throw new Error('Post-write verification failed because the snapshot hash did not match the expected result.');
       }
 
@@ -200,14 +246,28 @@ export class CollectionService {
         dryRun: false,
         backendId: backend.backendId,
         appliedOperationCount,
-        backupPath: rollbackPath,
+        backupPath: rollbackPath ? backupsByTargetPath[rollbackPath] ?? undefined : undefined,
         rollbackPath,
-        warnings: plan.warnings,
+        warnings: [...plan.warnings, ...(hasPendingFinalizeWarning ? draft.finalizeWarnings ?? [] : [])],
         skipped: []
       };
     } catch (error) {
-      await this.safetyService.rollbackMany(backupsByTargetPath);
-      throw error;
+      const originalError = error instanceof Error ? error : new Error(String(error));
+      const rollbackWrittenTargetPaths = (originalError as Error & { writtenTargetPaths?: string[] }).writtenTargetPaths ?? writtenTargetPaths;
+
+      try {
+        await this.safetyService.rollbackMany(backupsByTargetPath, rollbackWrittenTargetPaths);
+      } catch (rollbackError) {
+        const typedOriginalError = originalError as Error & { cause?: unknown; rollbackError?: unknown };
+        const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        if (typedOriginalError.cause === undefined) {
+          typedOriginalError.cause = rollbackError;
+        }
+        typedOriginalError.rollbackError = rollbackError;
+        typedOriginalError.message = `${typedOriginalError.message} (rollback also failed: ${rollbackMessage})`;
+      }
+
+      throw originalError;
     }
   }
 
