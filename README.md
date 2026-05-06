@@ -76,7 +76,8 @@ If your MCP client supports prompts, `steam-mcp` includes built-in workflows for
 - `STEAM_ID` — pin the Steam user ID to use
 - `STEAM_INSTALL_DIR` — override the Steam install directory
 - `STEAM_USERDATA_DIR` — override the Steam userdata directory
-- `STEAM_MCP_STATE_DIR` — override where MCP-owned plans, backups, and logs are stored
+- `STEAM_MCP_STATE_DIR` — override where MCP-owned plans, backups, logs, and metadata cache files are stored
+- `STEAM_STORE_TTL_DAYS` — positive integer day count before persisted store metadata is treated as stale and refreshed on next access; defaults to `30`
 
 ### Safety and default collection behavior
 
@@ -90,6 +91,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 - `plans/`
 - `backups/`
 - `logs/`
+- `metadata/`
 
 ## Tools overview
 

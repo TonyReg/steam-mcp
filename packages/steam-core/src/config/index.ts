@@ -3,6 +3,9 @@ import path from 'node:path';
 import type { SteamRuntimeConfig, SteamStateDirectories } from '../types.js';
 import { normalizeAbsolutePath, normalizeOptionalAbsolutePath, uniqueCollectionNames } from '../utils.js';
 
+const DEFAULT_STORE_APP_DETAILS_CACHE_TTL_DAYS = 30;
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+
 export class ConfigService {
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
 
@@ -15,6 +18,7 @@ export class ConfigService {
       installDirOverride: normalizeOptionalAbsolutePath(this.env.STEAM_INSTALL_DIR),
       userdataDirOverride: normalizeOptionalAbsolutePath(this.env.STEAM_USERDATA_DIR),
       stateDirectories: this.resolveStateDirectories(),
+      storeAppDetailsCacheTtlMs: this.parseStoreAppDetailsCacheTtlMs(),
       collectionWritesEnabled: this.env.STEAM_ENABLE_COLLECTION_WRITES === '1',
       windowsOrchestrationEnabled: this.env.STEAM_ENABLE_WINDOWS_ORCHESTRATION === '1',
       defaultReadOnlyCollections: this.parseDefaultCollectionEnv('STEAM_DEFAULT_READ_ONLY_COLLECTIONS'),
@@ -28,7 +32,8 @@ export class ConfigService {
       mkdir(directories.root, { recursive: true }),
       mkdir(directories.plansDir, { recursive: true }),
       mkdir(directories.backupsDir, { recursive: true }),
-      mkdir(directories.logsDir, { recursive: true })
+      mkdir(directories.logsDir, { recursive: true }),
+      mkdir(directories.metadataDir, { recursive: true })
     ]);
     return directories;
   }
@@ -53,6 +58,30 @@ export class ConfigService {
     return uniqueCollectionNames(parsed);
   }
 
+  private parseStoreAppDetailsCacheTtlMs(): number {
+    const rawValue = this.env.STEAM_STORE_TTL_DAYS;
+    if (!rawValue || rawValue.trim() === '') {
+      return DEFAULT_STORE_APP_DETAILS_CACHE_TTL_DAYS * MILLISECONDS_PER_DAY;
+    }
+
+    const trimmed = rawValue.trim();
+    if (!/^\d+$/.test(trimmed)) {
+      throw new Error('STEAM_STORE_TTL_DAYS must be a positive integer number of days.');
+    }
+
+    const parsedDays = Number.parseInt(trimmed, 10);
+    if (!Number.isSafeInteger(parsedDays) || parsedDays <= 0) {
+      throw new Error('STEAM_STORE_TTL_DAYS must be a positive integer number of days.');
+    }
+
+    const ttlMs = parsedDays * MILLISECONDS_PER_DAY;
+    if (!Number.isSafeInteger(ttlMs)) {
+      throw new Error('STEAM_STORE_TTL_DAYS must be a positive integer number of days.');
+    }
+
+    return ttlMs;
+  }
+
   private resolveStateDirectories(): SteamStateDirectories {
     const configuredRoot = normalizeOptionalAbsolutePath(this.env.STEAM_MCP_STATE_DIR);
     const localAppData = normalizeOptionalAbsolutePath(this.env.LOCALAPPDATA)
@@ -63,7 +92,8 @@ export class ConfigService {
       root,
       plansDir: normalizeAbsolutePath(path.join(root, 'plans')),
       backupsDir: normalizeAbsolutePath(path.join(root, 'backups')),
-      logsDir: normalizeAbsolutePath(path.join(root, 'logs'))
+      logsDir: normalizeAbsolutePath(path.join(root, 'logs')),
+      metadataDir: normalizeAbsolutePath(path.join(root, 'metadata'))
     };
   }
 }

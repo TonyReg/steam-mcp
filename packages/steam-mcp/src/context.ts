@@ -1,3 +1,4 @@
+import path from 'node:path';
 import {
   CloudStorageJsonCollectionBackend,
   CollectionBackendRegistry,
@@ -41,7 +42,10 @@ export function createSteamMcpContext(env: NodeJS.ProcessEnv = process.env): Ste
     fetchImpl: fetch,
     steamWebApiKey: config.steamWebApiKey,
     getSelectedUserId: async () => (await discoveryService.discover()).selectedUserId
-  }), deckStatusProvider);
+  }), deckStatusProvider, {
+    cacheDir: path.join(config.stateDirectories.metadataDir, 'store-appdetails'),
+    cacheTtlMs: config.storeAppDetailsCacheTtlMs
+  });
 
   const backendRegistry = new CollectionBackendRegistry([], {
     'cloudstorage-json': (sourcePath, steamId) => new CloudStorageJsonCollectionBackend(sourcePath, steamId)

@@ -193,6 +193,7 @@ export interface SteamStateDirectories {
   plansDir: string;
   backupsDir: string;
   logsDir: string;
+  metadataDir: string;
 }
 
 export interface SteamRuntimeConfig {
@@ -201,6 +202,7 @@ export interface SteamRuntimeConfig {
   installDirOverride?: string;
   userdataDirOverride?: string;
   stateDirectories: SteamStateDirectories;
+  storeAppDetailsCacheTtlMs: number;
   collectionWritesEnabled: boolean;
   windowsOrchestrationEnabled: boolean;
   defaultReadOnlyCollections: string[];

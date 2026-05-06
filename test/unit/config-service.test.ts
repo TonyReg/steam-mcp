@@ -71,3 +71,37 @@ test('config service parses Windows orchestration flag from env', () => {
 
   assert.equal(new ConfigService(createEnv()).resolve().windowsOrchestrationEnabled, false);
 });
+
+test('config service resolves metadata state directory under the MCP root', () => {
+  const config = new ConfigService(createEnv({
+    STEAM_MCP_STATE_DIR: path.join(os.tmpdir(), 'steam-mcp-config-service-root')
+  })).resolve();
+
+  assert.equal(config.stateDirectories.metadataDir, path.join(config.stateDirectories.root, 'metadata'));
+});
+
+test('config service defaults store metadata ttl to 30 days and parses explicit day values', () => {
+  const defaultConfig = new ConfigService(createEnv()).resolve();
+  assert.equal(defaultConfig.storeAppDetailsCacheTtlMs, 30 * 24 * 60 * 60 * 1000);
+
+  const blankConfig = new ConfigService(createEnv({
+    STEAM_STORE_TTL_DAYS: '   '
+  })).resolve();
+  assert.equal(blankConfig.storeAppDetailsCacheTtlMs, 30 * 24 * 60 * 60 * 1000);
+
+  const configured = new ConfigService(createEnv({
+    STEAM_STORE_TTL_DAYS: ' 45 '
+  })).resolve();
+  assert.equal(configured.storeAppDetailsCacheTtlMs, 45 * 24 * 60 * 60 * 1000);
+});
+
+test('config service rejects invalid store metadata ttl env values', () => {
+  for (const value of ['0', '-1', '1.5', 'abc', '12days', '9007199254740991']) {
+    assert.throws(
+      () => new ConfigService(createEnv({
+        STEAM_STORE_TTL_DAYS: value
+      })).resolve(),
+      /STEAM_STORE_TTL_DAYS must be a positive integer number of days\./
+    );
+  }
+});
