@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { normalizeCollectionName, uniqueCollectionNames } from '@steam-mcp/steam-core';
+import { normalizeCollectionName, normalizeWhitespace, uniqueCollectionNames } from '@steam-mcp/steam-core';
 import type { SteamMcpContext } from '../context.js';
 import { registerToolShallow } from '../mcp/register-tool-shallow.js';
 import { deckStatusSchema } from '../schemas/index.js';
@@ -30,8 +30,11 @@ export function registerSteamFindSimilarTool(server: McpServer, context: SteamMc
       const args = steamFindSimilarArgsSchema.parse(rawArgs);
       const config = context.configService.resolve();
       const effectiveIgnoreCollections = uniqueCollectionNames([...config.defaultIgnoreCollections, ...(args.ignoreCollections ?? [])]);
+      const normalizedIgnoreCollections = new Set(effectiveIgnoreCollections.map((collection) => normalizeCollectionName(collection)));
+      const normalizedQuery = normalizeWhitespace(args.query ?? '');
       const effectiveArgs = {
         ...args,
+        query: normalizedQuery === '' ? undefined : normalizedQuery,
         ignoreCollections: effectiveIgnoreCollections
       };
       const scope = args.scope ?? 'library';
@@ -44,12 +47,25 @@ export function registerSteamFindSimilarTool(server: McpServer, context: SteamMc
         };
       }
 
-      const ignoredCollections = new Set(effectiveIgnoreCollections.map((group) => normalizeCollectionName(group)));
       const seedGames = args.seedAppIds?.length
-        ? library.games.filter((game) => args.seedAppIds?.includes(game.appId) && !isIgnoredGame(game.collections, ignoredCollections))
-        : library.games.filter((game) => args.query ? game.name.toLowerCase().includes(args.query.toLowerCase()) : false).filter((game) => !isIgnoredGame(game.collections, ignoredCollections)).slice(0, 3);
-      const storeCandidates = await context.storeClient.search({ query: args.query ?? seedGames[0]?.name ?? '', deckStatuses: args.deckStatuses, limit: args.limit ?? 20 });
-      const storeMatches = context.recommendService.rankSimilarStoreCandidates(seedGames, storeCandidates);
+        ? library.games
+          .filter((game) => args.seedAppIds?.includes(game.appId))
+          .filter((game) => !(game.collections ?? []).some((gameCollection) => normalizedIgnoreCollections.has(normalizeCollectionName(gameCollection))))
+        : normalizedQuery === ''
+          ? []
+          : context.searchService.searchLibrary(library.games, {
+            query: normalizedQuery,
+            ignoreCollections: effectiveIgnoreCollections,
+            deckStatuses: args.deckStatuses,
+            limit: 3
+          }).map((match) => match.item);
+      const storeSearchQuery = normalizedQuery || seedGames[0]?.name;
+      const storeMatches = storeSearchQuery
+        ? context.recommendService.rankSimilarStoreCandidates(
+          seedGames,
+          await context.storeClient.search({ query: storeSearchQuery, deckStatuses: args.deckStatuses, limit: args.limit ?? 20 })
+        )
+        : [];
       const result = scope === 'store'
         ? storeMatches
         : { library: libraryMatches, store: storeMatches };
@@ -59,12 +75,4 @@ export function registerSteamFindSimilarTool(server: McpServer, context: SteamMc
       };
     }
   );
-}
-
-function isIgnoredGame(collections: string[] | undefined, ignoredCollections: Set<string>): boolean {
-  if (ignoredCollections.size === 0) {
-    return false;
-  }
-
-  return (collections ?? []).some((collection) => ignoredCollections.has(collection.trim().toLowerCase()));
 }
