@@ -8,7 +8,7 @@ const steamCollectionApplyInputShape = {
   planId: planIdSchema,
   dryRun: z.boolean().optional(),
   requireSteamClosed: z.boolean().optional(),
-  experimentalFinalize: z.boolean().optional()
+  finalize: z.literal(true).optional()
 };
 
 const steamCollectionApplyArgsSchema = z.object(steamCollectionApplyInputShape);
@@ -19,7 +19,7 @@ export function registerSteamCollectionApplyTool(server: McpServer, context: Ste
     'steam_collection_apply',
     {
       title: 'Steam collection apply',
-      description: 'Apply a previously generated durable collection plan. Experimental JSON-only two-stage cloudstorage sync is available with experimentalFinalize=false for dirty stage and experimentalFinalize=true for finalize; omitted keeps one-shot behavior. Experimental staged calls require pair-array cloudstorage format and reject requireSteamClosed=false.',
+      description: 'Apply a previously generated durable collection plan. STEAM_ENABLE_COLLECTION_WRITES=1 remains required. By default this performs the dirty stage of the staged cloudstorage apply flow; call again with finalize=true to finalize. dryRun=true validates the staged plan without stopping or relaunching Steam. When STEAM_ENABLE_WINDOWS_ORCHESTRATION=1 is enabled on Windows, steam-mcp can close Steam before non-dry-run apply and best-effort relaunch it afterward without changing the staged model. Staged apply requires pair-array cloudstorage format and rejects requireSteamClosed=false.',
       inputSchema: steamCollectionApplyArgsSchema
     },
     async (rawArgs: unknown) => {
@@ -27,7 +27,7 @@ export function registerSteamCollectionApplyTool(server: McpServer, context: Ste
       const result = await context.collectionService.applyPlan(args.planId, {
         dryRun: args.dryRun,
         requireSteamClosed: args.requireSteamClosed,
-        experimentalFinalize: args.experimentalFinalize
+        finalize: args.finalize
       });
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]

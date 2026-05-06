@@ -35,7 +35,9 @@ Recommended flow:
 2. `steam_library_search` or `steam_library_list`
 3. `steam_collection_plan`
 4. Review matched games, warnings, and destructive status with the user
-5. Only use `steam_collection_apply` after explicit confirmation and when `STEAM_ENABLE_COLLECTION_WRITES=1`
+5. Only use `steam_collection_apply` after explicit confirmation and when `STEAM_ENABLE_COLLECTION_WRITES=1`; treat that flag as the explicit write-unlock for Steam-owned mutations.
+6. `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` is a separate Windows-only opt-in wrapper: it can best-effort close Steam before each staged apply call and relaunch it afterward only if the wrapper stopped it.
+7. Plain apply performs the dirty stage and `finalize=true` completes finalize; any relaunch is best-effort only and does not imply Steam sync has completed.
 
 ### `steam_deck_backlog_triage`
 

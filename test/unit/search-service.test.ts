@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SearchService, type GameRecord } from '@steam-mcp/steam-core';
 
-test('search service ignores groups case-insensitively', () => {
+test('search service ignores collections case-insensitively', () => {
   const games: GameRecord[] = [
     {
       appId: 1,
@@ -27,7 +27,7 @@ test('search service ignores groups case-insensitively', () => {
   const service = new SearchService();
   const matches = service.searchLibrary(games, {
     query: 'portal',
-    ignoreGroups: [' disliked '],
+    ignoreCollections: [' disliked '],
     limit: 10
   });
 

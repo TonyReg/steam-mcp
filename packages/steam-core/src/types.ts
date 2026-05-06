@@ -39,8 +39,8 @@ export interface CollectionPlanAppOperation {
 }
 
 export interface CollectionPlanPolicies {
-  readOnlyGroups: string[];
-  ignoreGroups: string[];
+  readOnlyCollections: string[];
+  ignoreCollections: string[];
 }
 
 export interface CollectionPlan {
@@ -86,8 +86,8 @@ export interface CollectionPlanRequest {
   mode?: PlanMode;
   request?: string;
   rules?: CollectionRule[];
-  readOnlyGroups?: string[];
-  ignoreGroups?: string[];
+  readOnlyCollections?: string[];
+  ignoreCollections?: string[];
 }
 
 export interface CollectionPlanPreview {
@@ -99,7 +99,7 @@ export interface CollectionPlanPreview {
 export interface CollectionApplyOptions {
   dryRun?: boolean;
   requireSteamClosed?: boolean;
-  experimentalFinalize?: boolean;
+  finalize?: true;
 }
 
 export interface CollectionApplyResult {
@@ -136,7 +136,7 @@ export interface LibraryListOptions {
   collections?: string[];
   played?: boolean;
   deckStatuses?: DeckStatus[];
-  ignoreGroups?: string[];
+  ignoreCollections?: string[];
   sortBy?: 'name' | 'playtime' | 'lastPlayed';
   limit?: number;
 }
@@ -160,7 +160,7 @@ export interface LibrarySearchOptions {
   collections?: string[];
   played?: boolean;
   deckStatuses?: DeckStatus[];
-  ignoreGroups?: string[];
+  ignoreCollections?: string[];
   limit?: number;
 }
 
@@ -176,7 +176,7 @@ export interface SimilarRequest {
   scope?: 'library' | 'store' | 'both';
   deckStatuses?: DeckStatus[];
   limit?: number;
-  ignoreGroups?: string[];
+  ignoreCollections?: string[];
 }
 
 export interface ExportResult {
@@ -202,8 +202,9 @@ export interface SteamRuntimeConfig {
   userdataDirOverride?: string;
   stateDirectories: SteamStateDirectories;
   collectionWritesEnabled: boolean;
-  defaultReadOnlyGroups: string[];
-  defaultIgnoreGroups: string[];
+  windowsOrchestrationEnabled: boolean;
+  defaultReadOnlyCollections: string[];
+  defaultIgnoreCollections: string[];
 }
 
 export interface SteamDiscoveryResult {
@@ -229,6 +230,8 @@ export interface SteamStatusResult {
   collectionSourcePath?: string;
   collectionApplyEnabled: boolean;
   collectionApplySafe: boolean;
+  windowsOrchestrationEnabled: boolean;
+  windowsOrchestrationSupported: boolean;
   stateDirectories: SteamStateDirectories;
   libraryFolders: string[];
   warnings: string[];

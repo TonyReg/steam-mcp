@@ -46,6 +46,12 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       'steam_status',
       'steam_store_search'
     ]);
+    const collectionApplyTool = tools.tools.find((tool) => tool.name === 'steam_collection_apply');
+    assert.ok(collectionApplyTool);
+    assert.match(JSON.stringify(collectionApplyTool), /"finalize"/);
+    assert.doesNotMatch(JSON.stringify(collectionApplyTool), /experimentalFinalize/);
+    assert.match(JSON.stringify(collectionApplyTool), /STEAM_ENABLE_COLLECTION_WRITES=1/);
+    assert.match(JSON.stringify(collectionApplyTool), /STEAM_ENABLE_WINDOWS_ORCHESTRATION=1/);
 
     const prompts = await client.listPrompts();
     const promptNames = prompts.prompts.map((prompt) => prompt.name).sort((left, right) => left.localeCompare(right));
@@ -64,9 +70,13 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     });
     assert.match(JSON.stringify(collectionPlannerPrompt), /steam_collection_plan/);
     assert.match(JSON.stringify(collectionPlannerPrompt), /Group co-op hidden backlog/);
+    assert.match(JSON.stringify(collectionPlannerPrompt), /STEAM_ENABLE_WINDOWS_ORCHESTRATION=1/);
+    assert.match(JSON.stringify(collectionPlannerPrompt), /does not mean Steam sync has completed/);
 
     const status = await client.callTool({ name: 'steam_status', arguments: {} });
     assert.match(JSON.stringify(status), /cloudstorage-json/);
+    assert.match(JSON.stringify(status), /windowsOrchestrationEnabled/);
+    assert.match(JSON.stringify(status), /windowsOrchestrationSupported/);
 
     const library = await client.callTool({ name: 'steam_library_list', arguments: { limit: 2 } });
     assert.match(JSON.stringify(library), /Portal 2/);
@@ -141,13 +151,13 @@ test('stdio server reports Steam Web API key availability when configured', asyn
   }
 });
 
-test('stdio server applies env-configured default protected groups', async () => {
+test('stdio server applies env-configured default protected collections', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
-  fixture.env.STEAM_DEFAULT_READ_ONLY_GROUPS = '["Puzzle"]';
-  fixture.env.STEAM_DEFAULT_IGNORE_GROUPS = '["Puzzle"]';
+  fixture.env.STEAM_DEFAULT_READ_ONLY_COLLECTIONS = '["Puzzle"]';
+  fixture.env.STEAM_DEFAULT_IGNORE_COLLECTIONS = '["Puzzle"]';
 
-  const client = new Client({ name: 'steam-mcp-test-client-default-groups', version: '0.1.0' });
+  const client = new Client({ name: 'steam-mcp-test-client-default-collections', version: '0.1.0' });
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [path.join(repoRoot, 'packages', 'steam-mcp', 'dist', 'index.js')],
@@ -174,14 +184,14 @@ test('stdio server applies env-configured default protected groups', async () =>
     const planPayload = parseFirstTextContent(planResult) as {
       plan: {
         policies: {
-          readOnlyGroups: string[];
-          ignoreGroups: string[];
+          readOnlyCollections: string[];
+          ignoreCollections: string[];
         };
       };
     };
     assert.deepEqual(planPayload.plan.policies, {
-      readOnlyGroups: ['Puzzle'],
-      ignoreGroups: ['Puzzle']
+      readOnlyCollections: ['Puzzle'],
+      ignoreCollections: ['Puzzle']
     });
 
     const similarResult = await client.callTool({

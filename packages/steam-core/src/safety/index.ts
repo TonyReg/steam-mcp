@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, realpath, rename, rm, writeFile } from 'node
 import os from 'node:os';
 import path from 'node:path';
 import { execFile as execFileCallback } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { ensurePathInsideRoot, normalizeAbsolutePath } from '../utils.js';
 
@@ -15,12 +16,16 @@ export class SafetyService {
     return normalizeAbsolutePath(await realpath(normalizeAbsolutePath(targetPath)));
   }
 
+  isWindowsOrchestrationSupported(): boolean {
+    return os.platform() === 'win32';
+  }
+
   async isSteamRunning(): Promise<boolean> {
     if (this.steamRunningDetector) {
       return this.steamRunningDetector();
     }
 
-    if (os.platform() !== 'win32') {
+    if (!this.isWindowsOrchestrationSupported()) {
       return false;
     }
 
@@ -29,6 +34,65 @@ export class SafetyService {
       return result.stdout.toLowerCase().includes('steam.exe');
     } catch {
       return false;
+    }
+  }
+
+  async stopSteamBestEffort(): Promise<boolean> {
+    if (!this.isWindowsOrchestrationSupported()) {
+      return false;
+    }
+
+    if (!(await this.isSteamRunning())) {
+      return true;
+    }
+
+    try {
+      await execFile('taskkill', ['/IM', 'steam.exe', '/T']);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async waitForSteamStopped(timeoutMs = 15_000, pollIntervalMs = 250): Promise<boolean> {
+    return this.waitForSteamState(false, timeoutMs, pollIntervalMs);
+  }
+
+  async startSteamBestEffort(timeoutMs = 5_000, pollIntervalMs = 250): Promise<boolean> {
+    if (!this.isWindowsOrchestrationSupported()) {
+      return false;
+    }
+
+    if (await this.isSteamRunning()) {
+      return true;
+    }
+
+    try {
+      await execFile('cmd', ['/c', 'start', '', 'steam://open/main']);
+    } catch {
+      return false;
+    }
+
+    return this.waitForSteamStarted(timeoutMs, pollIntervalMs);
+  }
+
+  async waitForSteamStarted(timeoutMs = 5_000, pollIntervalMs = 250): Promise<boolean> {
+    return this.waitForSteamState(true, timeoutMs, pollIntervalMs);
+  }
+
+  protected async waitForSteamState(targetRunning: boolean, timeoutMs: number, pollIntervalMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+
+    while (true) {
+      if (await this.isSteamRunning() === targetRunning) {
+        return true;
+      }
+
+      if (Date.now() >= deadline) {
+        return false;
+      }
+
+      await delay(Math.max(1, pollIntervalMs));
     }
   }
 

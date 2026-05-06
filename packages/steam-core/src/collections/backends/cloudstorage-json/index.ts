@@ -68,10 +68,10 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
     return warnings;
   }
 
-  async applyPlan(plan: CollectionPlan, snapshot: CollectionSnapshot, options: { experimentalFinalize?: boolean } = {}): Promise<CollectionBackendApplyDraft> {
+  async applyPlan(plan: CollectionPlan, snapshot: CollectionSnapshot, options: { finalize?: true } = {}): Promise<CollectionBackendApplyDraft> {
     const parsedDocument = await this.readDocument();
-    if (options.experimentalFinalize !== undefined && parsedDocument.format !== 'pair-array') {
-      throw new Error('Experimental staged collection sync requires pair-array cloudstorage format.');
+    if (parsedDocument.format !== 'pair-array') {
+      throw new Error('Staged collection sync requires pair-array cloudstorage format.');
     }
 
     const nextDocument = updateDocument(parsedDocument.document, plan, snapshot);
@@ -82,31 +82,7 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
     const parsedNamespaces = await this.readNamespacesDocument(namespacePath);
     const currentNamespaceValue = parsedNamespaces.valueByNamespace.get(COLLECTION_NAMESPACE_ID);
 
-    if (options.experimentalFinalize === undefined) {
-      const nextNamespaceValue = documentChanged ? bumpNamespaceValue(currentNamespaceValue) : currentNamespaceValue;
-      const writes = documentChanged
-        ? [{
-            targetPath: this.sourcePath,
-            content: serializeDocument(parsedDocument.document, nextDocument, parsedDocument.format, parsedDocument.keyOrder, nextNamespaceValue)
-          }]
-        : [];
-
-      if (nextNamespaceValue !== undefined && nextNamespaceValue !== currentNamespaceValue) {
-        writes.push({
-          targetPath: namespacePath,
-          content: serializeNamespacesDocument(updateNamespacesDocument(parsedNamespaces.values, nextNamespaceValue))
-        });
-      }
-
-      return {
-        dirtyWrites: writes,
-        finalizeWrites: [],
-        expectedDirtySnapshotHash: nextSnapshot.snapshotHash,
-        expectedFinalSnapshotHash: nextSnapshot.snapshotHash
-      };
-    }
-
-    if (options.experimentalFinalize === false) {
+    if (options.finalize !== true) {
       if (!documentChanged) {
         return {
           dirtyWrites: [],
@@ -167,7 +143,7 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
         finalizeWrites,
         expectedDirtySnapshotHash: nextSnapshot.snapshotHash,
         expectedFinalSnapshotHash: nextSnapshot.snapshotHash,
-        finalizeWarnings: modifiedKeys.length === 0 ? undefined : ['Experimental JSON-only stage 1 applied; pending finalize with experimentalFinalize=true.']
+        finalizeWarnings: modifiedKeys.length === 0 ? undefined : ['Dirty stage applied; call steam_collection_apply with finalize=true to finalize.']
       };
     }
 
@@ -176,7 +152,7 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
     const dirtyWrappedKeys = resolveDirtyWrappedCollectionKeys(parsedDocument.document);
     if (modifiedKeys.length === 0) {
       if (dirtyWrappedKeys.length > 0) {
-        throw new Error(`Experimental finalize cannot continue because staged state appears corrupted: modified sidecar is empty while dirty wrapped entries remain (${dirtyWrappedKeys.join(', ')}).`);
+        throw new Error(`Finalize cannot continue because staged state appears corrupted: modified sidecar is empty while dirty wrapped entries remain (${dirtyWrappedKeys.join(', ')}).`);
       }
 
       return {
@@ -187,7 +163,7 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
     }
 
     if (currentNamespaceValue === undefined) {
-      throw new Error('Experimental finalize cannot continue because namespace metadata is missing for a dirty staged state.');
+      throw new Error('Finalize cannot continue because namespace metadata is missing for a dirty staged state.');
     }
 
     const finalizedNamespaceValue = validateFinalizedNamespaceValue(currentNamespaceValue);
@@ -199,7 +175,7 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
       || normalizedModifiedKeys.some((key, index) => key !== normalizedDirtyWrappedKeys[index])
     ) {
       throw new Error(
-        `Experimental finalize cannot continue because staged state appears corrupted: modified sidecar keys (${normalizedModifiedKeys.join(', ')}) do not match dirty wrapped entries (${normalizedDirtyWrappedKeys.join(', ')}).`
+        `Finalize cannot continue because staged state appears corrupted: modified sidecar keys (${normalizedModifiedKeys.join(', ')}) do not match dirty wrapped entries (${normalizedDirtyWrappedKeys.join(', ')}).`
       );
     }
 
@@ -575,9 +551,9 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
 
   const hidden = new Set<string>(Object.keys(snapshot.hiddenByApp).filter((appId) => snapshot.hiddenByApp[appId]));
   const collections = new Map<string, Set<string>>();
-  const protectedGroups = new Set<string>([
-    ...toCollectionNameSet(plan.policies.readOnlyGroups),
-    ...toCollectionNameSet(plan.policies.ignoreGroups)
+  const protectedCollections = new Set<string>([
+    ...toCollectionNameSet(plan.policies.readOnlyCollections),
+    ...toCollectionNameSet(plan.policies.ignoreCollections)
   ]);
 
   for (const [appId, collectionNames] of Object.entries(snapshot.collectionsByApp)) {
@@ -587,7 +563,7 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
   for (const operation of Object.values(plan.operations)) {
     const appId = appIdString(operation.appId);
     const currentCollections = collections.get(appId) ?? new Set<string>();
-    const protectedMemberships = getProtectedMemberships(currentCollections, protectedGroups);
+    const protectedMemberships = getProtectedMemberships(currentCollections, protectedCollections);
 
     if (operation.hidden !== undefined) {
       if (operation.hidden) {
@@ -600,7 +576,7 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
     if (operation.collectionsSet) {
       currentCollections.clear();
       for (const collectionName of operation.collectionsSet) {
-        if (protectedGroups.has(normalizeCollectionName(collectionName))) {
+        if (protectedCollections.has(normalizeCollectionName(collectionName))) {
           continue;
         }
 
@@ -611,7 +587,7 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
     }
 
     for (const collectionName of operation.collectionsToAdd ?? []) {
-      if (protectedGroups.has(normalizeCollectionName(collectionName))) {
+      if (protectedCollections.has(normalizeCollectionName(collectionName))) {
         continue;
       }
 
@@ -619,7 +595,7 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
     }
 
     for (const collectionName of operation.collectionsToRemove ?? []) {
-      if (protectedGroups.has(normalizeCollectionName(collectionName))) {
+      if (protectedCollections.has(normalizeCollectionName(collectionName))) {
         continue;
       }
 
@@ -727,7 +703,7 @@ function validateFinalizedNamespaceValue(value: string): string {
     return String(Number(value));
   }
 
-  throw new Error(`Experimental finalize cannot continue because namespace metadata is invalid (${value}).`);
+  throw new Error(`Finalize cannot continue because namespace metadata is invalid (${value}).`);
 }
 
 function updateNamespacesDocument(values: Array<[number, string]>, nextNamespaceValue: string): Array<[number, string]> {
@@ -761,12 +737,12 @@ function resolveBackendKey(collectionName: string, snapshot: CollectionSnapshot)
   return snapshot.rawMetadata.backendKeyMap[normalizeCollectionName(collectionName)] ?? `user-collections.uc-${slugify(collectionName)}`;
 }
 
-function getProtectedMemberships(currentCollections: Set<string>, protectedGroups: Set<string>): string[] {
-  if (protectedGroups.size === 0) {
+function getProtectedMemberships(currentCollections: Set<string>, protectedCollections: Set<string>): string[] {
+  if (protectedCollections.size === 0) {
     return [];
   }
 
-  return [...currentCollections].filter((collectionName) => protectedGroups.has(normalizeCollectionName(collectionName)));
+  return [...currentCollections].filter((collectionName) => protectedCollections.has(normalizeCollectionName(collectionName)));
 }
 
 function rehydrateProtectedMemberships(currentCollections: Set<string>, protectedMemberships: string[]): void {

@@ -16,8 +16,9 @@ export class ConfigService {
       userdataDirOverride: normalizeOptionalAbsolutePath(this.env.STEAM_USERDATA_DIR),
       stateDirectories: this.resolveStateDirectories(),
       collectionWritesEnabled: this.env.STEAM_ENABLE_COLLECTION_WRITES === '1',
-      defaultReadOnlyGroups: this.parseCollectionGroupEnv('STEAM_DEFAULT_READ_ONLY_GROUPS'),
-      defaultIgnoreGroups: this.parseCollectionGroupEnv('STEAM_DEFAULT_IGNORE_GROUPS')
+      windowsOrchestrationEnabled: this.env.STEAM_ENABLE_WINDOWS_ORCHESTRATION === '1',
+      defaultReadOnlyCollections: this.parseDefaultCollectionEnv('STEAM_DEFAULT_READ_ONLY_COLLECTIONS'),
+      defaultIgnoreCollections: this.parseDefaultCollectionEnv('STEAM_DEFAULT_IGNORE_COLLECTIONS')
     };
   }
 
@@ -32,7 +33,7 @@ export class ConfigService {
     return directories;
   }
 
-  private parseCollectionGroupEnv(name: 'STEAM_DEFAULT_READ_ONLY_GROUPS' | 'STEAM_DEFAULT_IGNORE_GROUPS'): string[] {
+  private parseDefaultCollectionEnv(name: 'STEAM_DEFAULT_READ_ONLY_COLLECTIONS' | 'STEAM_DEFAULT_IGNORE_COLLECTIONS'): string[] {
     const rawValue = this.env[name];
     if (!rawValue || rawValue.trim() === '') {
       return [];

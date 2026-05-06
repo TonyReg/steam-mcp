@@ -10,24 +10,27 @@ Use this skill for plan-first Steam collection workflows built on top of the Ste
 ## When to Use
 
 - The user wants to create or reorganize named collections.
-- The user wants to adjust hidden flags or protect user-managed groups from MCP changes.
+- The user wants to adjust hidden flags or protect user-managed collections from MCP changes.
 - The user wants a safe preview before any Steam-owned mutation happens.
 
 ## Workflow
 
 1. Start with the MCP prompt `steam_collection_planner` when your client supports prompts.
-2. Call `steam_status` first and confirm the selected Steam user, the `cloudstorage-json` backend, and whether Steam-owned writes are enabled.
+2. Call `steam_status` first and confirm the selected Steam user, the `cloudstorage-json` backend, and whether Steam-owned writes are enabled via the explicit write-unlock.
 3. Use `steam_library_search` or `steam_library_list` to inspect the target games.
 4. Call `steam_collection_plan` to create a durable preview artifact.
 5. Review `matchedGames`, warnings, destructive status, and the plan identifier with the user.
-6. Only call `steam_collection_apply` after explicit user confirmation and only when Steam-owned writes are enabled.
+6. Only call `steam_collection_apply` after explicit user confirmation and only when Steam-owned writes are enabled via `STEAM_ENABLE_COLLECTION_WRITES=1`.
+7. Treat `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` as a separate Windows-only opt-in wrapper, not as a write-unlock; it can best-effort close Steam before each staged apply call and relaunch it afterward only if the wrapper stopped it.
 
 ## Safety Rules
 
 - `steam_collection_plan` may write MCP-owned durable plan files; that is allowed.
 - `steam_collection_apply` is the only tool that mutates Steam-owned state.
 - Never call `steam_collection_apply` unless the user explicitly asks for the mutation.
-- Remind the user that apply is backup-first, drift-checked, atomic, rollback-capable, and Steam-closed by default.
+- Remind the user that `STEAM_ENABLE_COLLECTION_WRITES=1` is the explicit write-unlock / operator kill switch.
+- Remind the user that `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` is only an optional Windows wrapper around the existing staged flow; it does not add a new tool argument or relax `requireSteamClosed=false`.
+- Remind the user that apply itself is backup-first, drift-checked, atomic, rollback-capable, requires Steam to be closed, uses a dirty-stage then finalize flow for cloudstorage changes, and any restart is best-effort only and does not imply Steam sync completion.
 
 ## Tool Order Reference
 

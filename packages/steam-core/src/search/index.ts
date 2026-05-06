@@ -4,9 +4,9 @@ import { normalizeCollectionName, normalizeWhitespace } from '../utils.js';
 export class SearchService {
   searchLibrary(games: GameRecord[], options: LibrarySearchOptions): SearchMatch<GameRecord>[] {
     const query = normalizeWhitespace(options.query).toLowerCase();
-    const ignoredGroups = new Set((options.ignoreGroups ?? []).map((group) => normalizeCollectionName(group)));
+    const ignoredCollections = new Set((options.ignoreCollections ?? []).map((group) => normalizeCollectionName(group)));
     const results = games
-      .filter((game) => this.filterGame(game, options, ignoredGroups))
+      .filter((game) => this.filterGame(game, options, ignoredCollections))
       .map((game) => {
         const reasons: string[] = [];
         let score = 0;
@@ -43,8 +43,8 @@ export class SearchService {
     return results.slice(0, options.limit ?? 20);
   }
 
-  private filterGame(game: GameRecord, options: LibrarySearchOptions, ignoredGroups: Set<string>): boolean {
-    if (ignoredGroups.size > 0 && (game.collections ?? []).some((collection) => ignoredGroups.has(normalizeCollectionName(collection)))) {
+  private filterGame(game: GameRecord, options: LibrarySearchOptions, ignoredCollections: Set<string>): boolean {
+    if (ignoredCollections.size > 0 && (game.collections ?? []).some((collection) => ignoredCollections.has(normalizeCollectionName(collection)))) {
       return false;
     }
 

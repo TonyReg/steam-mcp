@@ -47,8 +47,8 @@ export class CollectionService {
     }
 
     const policies = normalizePolicies({
-      readOnlyGroups: [...config.defaultReadOnlyGroups, ...(request.readOnlyGroups ?? [])],
-      ignoreGroups: [...config.defaultIgnoreGroups, ...(request.ignoreGroups ?? [])]
+      readOnlyCollections: [...config.defaultReadOnlyCollections, ...(request.readOnlyCollections ?? [])],
+      ignoreCollections: [...config.defaultIgnoreCollections, ...(request.ignoreCollections ?? [])]
     });
 
     const [snapshot, library] = await Promise.all([
@@ -56,7 +56,7 @@ export class CollectionService {
       this.libraryService.list({
         includeStoreMetadata: true,
         includeDeckStatus: false,
-        ignoreGroups: policies.ignoreGroups,
+        ignoreCollections: policies.ignoreCollections,
         limit: 5000
       })
     ]);
@@ -120,17 +120,76 @@ export class CollectionService {
       throw new Error('No writable cloudstorage-json backend is available for the selected Steam user.');
     }
 
-    if (
-      options.experimentalFinalize !== undefined
-      && options.requireSteamClosed === false
-    ) {
-      throw new Error('Experimental staged collection sync requires Steam to be closed; omit requireSteamClosed=false for dirty/finalize calls.');
+    const writableDiscovery = discovery as typeof discovery & {
+      selectedUserId: string;
+      selectedUserDir: string;
+      collectionBackendId: string;
+      collectionSourcePath: string;
+    };
+
+    if (options.requireSteamClosed === false) {
+      throw new Error('Staged collection sync requires Steam to be closed; omit requireSteamClosed=false for dirty/finalize calls.');
     }
 
-    if (options.requireSteamClosed !== false && await this.safetyService.isSteamRunning()) {
-      throw new Error('Steam appears to be running. Close Steam or set requireSteamClosed=false explicitly.');
+    const windowsOrchestrationSupported = this.safetyService.isWindowsOrchestrationSupported();
+
+    if (options.dryRun) {
+      return this.applyPlanInner(normalizedPlanId, config, writableDiscovery, options);
     }
 
+    if (config.windowsOrchestrationEnabled && !windowsOrchestrationSupported) {
+      throw new Error('Windows orchestration is enabled, but this runtime is not supported. Disable STEAM_ENABLE_WINDOWS_ORCHESTRATION or close Steam manually before calling steam_collection_apply.');
+    }
+
+    const windowsOrchestrationActive = config.windowsOrchestrationEnabled && windowsOrchestrationSupported;
+    const steamRunning = await this.safetyService.isSteamRunning();
+
+    if (!windowsOrchestrationActive) {
+      if (steamRunning) {
+        throw new Error('Steam appears to be running. Close Steam before calling steam_collection_apply.');
+      }
+
+      return this.applyPlanInner(normalizedPlanId, config, writableDiscovery, options);
+    }
+
+    let stoppedByWrapper = false;
+
+    if (steamRunning) {
+      await this.safetyService.stopSteamBestEffort();
+      const steamStopped = await this.safetyService.waitForSteamStopped();
+      if (!steamStopped) {
+        throw new Error('Steam appears to be running. Windows orchestration could not confirm shutdown before steam_collection_apply.');
+      }
+
+      stoppedByWrapper = true;
+    }
+
+    try {
+      return await this.applyPlanInner(normalizedPlanId, config, writableDiscovery, options);
+    } finally {
+      if (stoppedByWrapper) {
+        await this.safelyRestartSteamAfterApply();
+      }
+    }
+  }
+
+  async readPlan(planId: string): Promise<CollectionPlan> {
+    const config = this.configService.resolve();
+    const planPath = this.resolvePlanPath(planId, config.stateDirectories.plansDir);
+    return JSON.parse(await readFile(planPath, 'utf8')) as CollectionPlan;
+  }
+
+  private async applyPlanInner(
+    normalizedPlanId: string,
+    config: ReturnType<ConfigService['resolve']>,
+    discovery: Awaited<ReturnType<SteamDiscoveryService['discover']>> & {
+      selectedUserId: string;
+      selectedUserDir: string;
+      collectionBackendId: string;
+      collectionSourcePath: string;
+    },
+    options: CollectionApplyOptions
+  ): Promise<CollectionApplyResult> {
     const backend = this.backendRegistry.resolve(
       discovery.collectionBackendId,
       discovery.collectionSourcePath,
@@ -146,7 +205,7 @@ export class CollectionService {
     const snapshot = await backend.readSnapshot();
     const rawValidationWarnings = backend.validatePlan(plan, snapshot);
     const validationWarnings = rawValidationWarnings.filter((warning) => !(
-      options.experimentalFinalize === true
+      options.finalize === true
       && warning === 'Snapshot hash drift detected.'
     ));
     if (validationWarnings.length > 0) {
@@ -165,23 +224,22 @@ export class CollectionService {
     }
 
     await this.safetyService.assertCollectionWriteTarget(discovery.collectionSourcePath, discovery.selectedUserDir);
-    const draft = await backend.applyPlan(plan, snapshot, { experimentalFinalize: options.experimentalFinalize });
-    const stageWrites = options.experimentalFinalize === true ? draft.finalizeWrites : draft.dirtyWrites;
-
+    const draft = await backend.applyPlan(plan, snapshot, { finalize: options.finalize });
+    const stageWrites = options.finalize === true ? draft.finalizeWrites : draft.dirtyWrites;
     const hasPendingFinalizeWarning = (draft.finalizeWarnings?.length ?? 0) > 0;
     const noOpStage = stageWrites.length === 0;
 
-    if (options.experimentalFinalize === true && !noOpStage) {
+    if (options.finalize === true && !noOpStage) {
       if (!plan.expectedDirtySnapshotHash) {
-        throw new Error('Experimental finalize requires a successful dirty stage with a persisted expectedDirtySnapshotHash.');
+        throw new Error('Finalize requires a successful dirty stage with a persisted expectedDirtySnapshotHash.');
       }
 
       if (snapshot.snapshotHash !== plan.expectedDirtySnapshotHash) {
-        throw new Error('Experimental finalize cannot continue because the staged snapshot drifted after dirty stage.');
+        throw new Error('Finalize cannot continue because the staged snapshot drifted after dirty stage.');
       }
     }
 
-    const planWrite = options.experimentalFinalize === false && stageWrites.length > 0 && draft.expectedDirtySnapshotHash
+    const planWrite = options.finalize !== true && stageWrites.length > 0 && draft.expectedDirtySnapshotHash
       ? {
           targetPath: planPath,
           content: `${JSON.stringify({
@@ -197,7 +255,7 @@ export class CollectionService {
         dryRun: false,
         backendId: backend.backendId,
         appliedOperationCount,
-        warnings: options.experimentalFinalize === true ? plan.warnings : [...plan.warnings, ...(hasPendingFinalizeWarning ? draft.finalizeWarnings ?? [] : [])],
+        warnings: options.finalize === true ? plan.warnings : [...plan.warnings, ...(hasPendingFinalizeWarning ? draft.finalizeWarnings ?? [] : [])],
         skipped: []
       };
     }
@@ -234,7 +292,7 @@ export class CollectionService {
         }
       }));
       const verifySnapshot = await backend.readSnapshot();
-      const expectedSnapshotHash = options.experimentalFinalize === true
+      const expectedSnapshotHash = options.finalize === true
         ? draft.expectedFinalSnapshotHash
         : draft.expectedDirtySnapshotHash ?? draft.expectedFinalSnapshotHash;
       if (verifySnapshot.snapshotHash !== expectedSnapshotHash) {
@@ -271,10 +329,12 @@ export class CollectionService {
     }
   }
 
-  async readPlan(planId: string): Promise<CollectionPlan> {
-    const config = this.configService.resolve();
-    const planPath = this.resolvePlanPath(planId, config.stateDirectories.plansDir);
-    return JSON.parse(await readFile(planPath, 'utf8')) as CollectionPlan;
+  private async safelyRestartSteamAfterApply(): Promise<void> {
+    try {
+      await this.safetyService.startSteamBestEffort();
+    } catch {
+      // Best-effort only.
+    }
   }
 
   private resolvePlanPath(planId: string, plansDir: string): string {
@@ -304,17 +364,17 @@ function normalizeRules(request: CollectionPlanRequest): CollectionRule[] {
   throw new Error('Collection planning requires either explicit rules or a non-empty request string.');
 }
 
-function normalizePolicies(request: Pick<CollectionPlanRequest, 'readOnlyGroups' | 'ignoreGroups'>): CollectionPlanPolicies {
+function normalizePolicies(request: Pick<CollectionPlanRequest, 'readOnlyCollections' | 'ignoreCollections'>): CollectionPlanPolicies {
   return {
-    readOnlyGroups: uniqueCollectionNames(request.readOnlyGroups ?? []),
-    ignoreGroups: uniqueCollectionNames(request.ignoreGroups ?? [])
+    readOnlyCollections: uniqueCollectionNames(request.readOnlyCollections ?? []),
+    ignoreCollections: uniqueCollectionNames(request.ignoreCollections ?? [])
   };
 }
 
 function normalizePersistedPlan(plan: CollectionPlan): CollectionPlan {
   return {
     ...plan,
-    policies: normalizePolicies(plan.policies ?? { readOnlyGroups: [], ignoreGroups: [] })
+    policies: normalizePolicies(plan.policies ?? { readOnlyCollections: [], ignoreCollections: [] })
   };
 }
 
@@ -325,13 +385,13 @@ function applyRuleToOperation(
   policies: CollectionPlanPolicies,
   warnings: string[]
 ): CollectionPlan['operations'][string] {
-  const protectedGroups = new Set<string>([
-    ...toCollectionNameSet(policies.readOnlyGroups),
-    ...toCollectionNameSet(policies.ignoreGroups)
+  const protectedCollections = new Set<string>([
+    ...toCollectionNameSet(policies.readOnlyCollections),
+    ...toCollectionNameSet(policies.ignoreCollections)
   ]);
   const collectionsToAdd = applyProtectedCollectionFilter(
     uniqueCollectionNames([...(operation.collectionsToAdd ?? []), ...(rule.collection ? [rule.collection] : []), ...(rule.addToCollections ?? [])]),
-    protectedGroups,
+    protectedCollections,
     operation.appId,
     'add',
     warnings
@@ -339,13 +399,13 @@ function applyRuleToOperation(
   let nextHidden = rule.hidden ?? operation.hidden;
   let nextCollectionsToRemove = applyProtectedCollectionFilter(
     uniqueCollectionNames([...(operation.collectionsToRemove ?? []), ...(rule.removeFromCollections ?? [])]),
-    protectedGroups,
+    protectedCollections,
     operation.appId,
     'remove',
     warnings
   );
   let nextCollectionsSet = rule.setCollections
-    ? applyProtectedCollectionFilter(uniqueCollectionNames(rule.setCollections), protectedGroups, operation.appId, 'set', warnings)
+    ? applyProtectedCollectionFilter(uniqueCollectionNames(rule.setCollections), protectedCollections, operation.appId, 'set', warnings)
     : operation.collectionsSet;
 
   if (mode === 'add-only') {
@@ -372,21 +432,21 @@ function applyRuleToOperation(
 
 function applyProtectedCollectionFilter(
   collectionNames: string[],
-  protectedGroups: Set<string>,
+  protectedCollections: Set<string>,
   appId: number,
   action: 'add' | 'remove' | 'set',
   warnings: string[]
 ): string[] {
-  if (protectedGroups.size === 0) {
+  if (protectedCollections.size === 0) {
     return collectionNames;
   }
 
   return collectionNames.filter((collectionName) => {
-    if (!protectedGroups.has(normalizeCollectionName(collectionName))) {
+    if (!protectedCollections.has(normalizeCollectionName(collectionName))) {
       return true;
     }
 
-    warnings.push(`Ignoring protected group ${collectionName} for app ${appId} during ${action}.`);
+    warnings.push(`Ignoring protected collection ${collectionName} for app ${appId} during ${action}.`);
     return false;
   });
 }

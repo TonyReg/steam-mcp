@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { RecommendService, type GameRecord } from '@steam-mcp/steam-core';
 
-test('recommend service ignores groups case-insensitively for seed ids and results', () => {
+test('recommend service ignores collections case-insensitively for seed ids and results', () => {
   const games: GameRecord[] = [
     {
       appId: 1,
@@ -37,14 +37,14 @@ test('recommend service ignores groups case-insensitively for seed ids and resul
   const service = new RecommendService();
   const matches = service.rankSimilarLibraryGames(games, {
     seedAppIds: [1, 2],
-    ignoreGroups: [' disliked '],
+    ignoreCollections: [' disliked '],
     limit: 10
   });
 
   assert.deepEqual(matches.map((match) => match.item.appId), [4]);
 });
 
-test('recommend service ignores query-based seeds from ignored groups', () => {
+test('recommend service ignores query-based seeds from ignored collections', () => {
   const games: GameRecord[] = [
     {
       appId: 1,
@@ -65,7 +65,7 @@ test('recommend service ignores query-based seeds from ignored groups', () => {
   const service = new RecommendService();
   const matches = service.rankSimilarLibraryGames(games, {
     query: 'portal 2',
-    ignoreGroups: ['DISLIKED'],
+    ignoreCollections: ['DISLIKED'],
     limit: 10
   });
 

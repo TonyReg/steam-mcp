@@ -22,7 +22,7 @@ skills/
   - export and `steam://` link workflows
 
 - **`steam-collection-planner`**
-  - plan-first collection and hidden-state workflows with read-only or ignored group protection
+  - plan-first collection and hidden-state workflows with read-only or ignored collection protection
   - explicitly separates preview planning from Steam-owned mutation
 
 - **`steam-deck-backlog-triage`**

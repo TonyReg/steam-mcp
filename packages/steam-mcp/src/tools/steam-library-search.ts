@@ -12,7 +12,7 @@ const steamLibrarySearchInputShape = {
   collections: z.array(z.string()).optional(),
   played: z.boolean().optional(),
   deckStatuses: z.array(deckStatusSchema).optional(),
-  ignoreGroups: z.array(z.string()).optional(),
+  ignoreCollections: z.array(z.string()).optional(),
   limit: z.number().int().min(1).max(200).optional()
 };
 
@@ -31,10 +31,10 @@ export function registerSteamLibrarySearchTool(server: McpServer, context: Steam
     async (rawArgs) => {
       const args = steamLibrarySearchArgsSchema.parse(rawArgs);
       const config = context.configService.resolve();
-      const effectiveIgnoreGroups = uniqueCollectionNames([...config.defaultIgnoreGroups, ...(args.ignoreGroups ?? [])]);
+      const effectiveIgnoreCollections = uniqueCollectionNames([...config.defaultIgnoreCollections, ...(args.ignoreCollections ?? [])]);
       const effectiveArgs = {
         ...args,
-        ignoreGroups: effectiveIgnoreGroups
+        ignoreCollections: effectiveIgnoreCollections
       };
       const library = await context.libraryService.list({ includeStoreMetadata: true, includeDeckStatus: true, limit: 5000 });
       const result = context.searchService.searchLibrary(library.games, effectiveArgs);

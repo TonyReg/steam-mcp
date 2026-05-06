@@ -6,15 +6,15 @@ import {
   CloudStorageJsonCollectionBackend,
   CollectionBackendRegistry,
   CollectionService,
-  ConfigService,
   DeckStatusProvider,
   LibraryService,
   LinkService,
-  SafetyService,
   SearchService,
   SteamDiscoveryService,
   StoreClient
-} from '@steam-mcp/steam-core';
+} from '../../packages/steam-core/src/index.js';
+import { ConfigService } from '../../packages/steam-core/src/config/index.js';
+import { SafetyService } from '../../packages/steam-core/src/safety/index.js';
 import {
   readModifiedKeys,
   readPairArrayDocument,
@@ -24,9 +24,13 @@ import {
 } from '../support/cloudstorage-shape.js';
 import { materializeSteamFixture } from '../support/fixture-steam.js';
 
-async function createCollectionServiceHarness(enableWrites = true) {
+async function createCollectionServiceHarness(enableWrites = true, envOverrides: NodeJS.ProcessEnv = {}) {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot, enableWrites);
+  fixture.env = {
+    ...fixture.env,
+    ...envOverrides
+  };
   const configService = new ConfigService(fixture.env);
   const discovery = new SteamDiscoveryService(configService.resolve());
   const sourcePath = path.join(fixture.cloudStorageDir, 'cloud-storage-namespace-1.json');
@@ -61,14 +65,46 @@ async function createCollectionServiceHarness(enableWrites = true) {
   };
 }
 
-test('collection service writes backup-first, keeps favorites read-only, and preserves read-only groups', async () => {
+class TrackingSafetyService extends SafetyService {
+  public readonly calls: string[] = [];
+  private running: boolean;
+
+  constructor(initiallyRunning: boolean) {
+    super(async () => this.running);
+    this.running = initiallyRunning;
+  }
+
+  override isWindowsOrchestrationSupported(): boolean {
+    return true;
+  }
+
+  override async stopSteamBestEffort(): Promise<boolean> {
+    this.calls.push('stopSteamBestEffort');
+    this.running = false;
+    return true;
+  }
+
+  override async waitForSteamStopped(): Promise<boolean> {
+    this.calls.push('waitForSteamStopped');
+    return !this.running;
+  }
+
+  override async startSteamBestEffort(): Promise<boolean> {
+    this.calls.push('startSteamBestEffort');
+    this.running = true;
+    return true;
+  }
+}
+
+test('collection service writes backup-first, keeps favorites read-only, and preserves read-only collections', async () => {
   const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
   const beforeDocumentText = await readFile(harness.sourcePath, 'utf8');
 
   const preview = await collectionService.createPlan({
     mode: 'merge',
-    readOnlyGroups: [' puzzle '],
+    readOnlyCollections: [' puzzle '],
     rules: [
       {
         appIds: [620],
@@ -77,29 +113,44 @@ test('collection service writes backup-first, keeps favorites read-only, and pre
     ]
   });
 
-  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
-  assert.equal(result.appliedOperationCount, 1);
-  assert.ok(result.backupPath);
-  assert.ok(result.rollbackPath);
-  assert.notEqual(result.backupPath, result.rollbackPath);
-  assert.ok(result.backupPath.startsWith(harness.configService.resolve().stateDirectories.backupsDir));
-  assert.equal(await readFile(result.backupPath, 'utf8'), beforeDocumentText);
+  const dirtyResult = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  const finalizeResult = await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true,
+    finalize: true
+  });
 
-  const updated = JSON.parse(await readFile(harness.sourcePath, 'utf8')) as Record<string, unknown>;
-  assert.equal((updated['unrelated-section'] as { preserve: boolean }).preserve, true);
-  assert.deepEqual(updated['user-collections.favorite'], ['620']);
+  assert.equal(dirtyResult.appliedOperationCount, 1);
+  assert.ok(dirtyResult.backupPath);
+  assert.ok(dirtyResult.rollbackPath);
+  assert.notEqual(dirtyResult.backupPath, dirtyResult.rollbackPath);
+  assert.ok(dirtyResult.backupPath.startsWith(harness.configService.resolve().stateDirectories.backupsDir));
+  assert.equal(await readFile(dirtyResult.backupPath, 'utf8'), beforeDocumentText);
+  assert.equal(finalizeResult.appliedOperationCount, 1);
+  assert.ok(finalizeResult.backupPath);
+  assert.ok(finalizeResult.rollbackPath);
 
-  const puzzle = updated['user-collections.uc-puzzle'] as { apps: string[]; name: string; description: string };
+  const updated = await readPairArrayDocument(harness.sourcePath);
+  const unrelated = readPairArrayPayload(updated, 'unrelated-section') as { preserve: boolean };
+  assert.equal(unrelated.preserve, true);
+
+  const favorite = readPairArrayPayload(updated, 'user-collections.favorite') as { added: number[]; removed: number[] };
+  assert.deepEqual(favorite.added, [620]);
+  assert.deepEqual(favorite.removed, []);
+
+  const puzzle = readPairArrayPayload(updated, 'user-collections.uc-puzzle') as { name: string; added: number[]; removed: number[]; description: string };
   assert.equal(puzzle.name, 'Puzzle');
-  assert.deepEqual(puzzle.apps, ['620']);
-  assert.equal(puzzle.description, 'Preserve me');
+  assert.deepEqual(puzzle.added, [620]);
+  assert.deepEqual(puzzle.removed, []);
+  assert.equal(puzzle.description, undefined);
 
-  const coop = updated['user-collections.uc-co-op'] as { apps: string[]; name: string };
+  const coop = readPairArrayPayload(updated, 'user-collections.uc-co-op') as { name: string; added: number[]; removed: number[] };
   assert.equal(coop.name, 'Co-op');
-  assert.deepEqual(coop.apps, ['620']);
+  assert.deepEqual(coop.added, [620]);
+  assert.deepEqual(coop.removed, []);
 });
 
-test('collection service preserves live-style pair-array documents and ignored-group memberships', async () => {
+test('collection service preserves live-style pair-array documents and ignored-collection memberships', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -109,7 +160,7 @@ test('collection service preserves live-style pair-array documents and ignored-g
 
   const preview = await collectionService.createPlan({
     mode: 'merge',
-    ignoreGroups: [' multiplayer '],
+    ignoreCollections: [' multiplayer '],
     rules: [
       {
         appIds: [620],
@@ -118,7 +169,12 @@ test('collection service preserves live-style pair-array documents and ignored-g
     ]
   });
 
-  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  const result = await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true,
+    finalize: true
+  });
   assert.equal(result.appliedOperationCount, 1);
 
   const updated = await readPairArrayDocument(harness.sourcePath);
@@ -192,6 +248,11 @@ test('collection service bumps wrapped entry metadata and namespace counter only
   });
 
   await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true,
+    finalize: true
+  });
 
   const updated = await readPairArrayDocument(harness.sourcePath);
   const puzzleWrapper = updated.find(([key]) => key === 'user-collections.uc-puzzle')?.[1] as Record<string, unknown>;
@@ -237,7 +298,201 @@ test('collection service leaves wrapped metadata and namespace counter unchanged
   assert.equal(await readFile(harness.namespacePath, 'utf8'), beforeNamespacesText);
 });
 
-test('collection service writes experimental dirty stage first', async () => {
+test('collection service rejects apply when Steam is running and orchestration is disabled', async () => {
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const collectionService = harness.createCollectionService(new SafetyService(async () => true));
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  await assert.rejects(
+    () => collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true }),
+    /Steam appears to be running\. Close Steam before calling steam_collection_apply\./
+  );
+});
+
+test('collection service orchestration stops Steam, applies staged flow, and restarts only when wrapper stopped it', async () => {
+  const harness = await createCollectionServiceHarness(true, {
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  });
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const safetyService = new TrackingSafetyService(true);
+  const collectionService = harness.createCollectionService(safetyService);
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  const dirtyResult = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  assert.equal(dirtyResult.appliedOperationCount, 1);
+  assert.deepEqual(safetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped', 'startSteamBestEffort']);
+
+  safetyService.calls.length = 0;
+
+  const finalizeResult = await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true,
+    finalize: true
+  });
+
+  assert.equal(finalizeResult.appliedOperationCount, 1);
+  assert.deepEqual(safetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped', 'startSteamBestEffort']);
+});
+
+test('collection service orchestration does not relaunch Steam when it was already closed', async () => {
+  const harness = await createCollectionServiceHarness(true, {
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  });
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const safetyService = new TrackingSafetyService(false);
+  const collectionService = harness.createCollectionService(safetyService);
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+
+  assert.equal(result.appliedOperationCount, 1);
+  assert.deepEqual(safetyService.calls, []);
+});
+
+test('collection service orchestration still attempts relaunch after inner apply failure', async () => {
+  const harness = await createCollectionServiceHarness(true, {
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  });
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+
+  class FailingRestartSafetyService extends TrackingSafetyService {
+    override async atomicWrite(targetPath: string, content: string): Promise<void> {
+      if (path.basename(targetPath).toLowerCase() === 'cloud-storage-namespaces.json') {
+        throw new Error('namespace write failed');
+      }
+
+      await super.atomicWrite(targetPath, content);
+    }
+  }
+
+  const safetyService = new FailingRestartSafetyService(true);
+  const collectionService = harness.createCollectionService(safetyService);
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  await assert.rejects(
+    () => collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true }),
+    /namespace write failed/
+  );
+  assert.deepEqual(safetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped', 'startSteamBestEffort']);
+});
+
+test('collection service still rejects requireSteamClosed=false when orchestration is enabled', async () => {
+  const harness = await createCollectionServiceHarness(true, {
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  });
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const collectionService = harness.createCollectionService(new TrackingSafetyService(true));
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  await assert.rejects(
+    () => collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: false }),
+    /requireSteamClosed=false/
+  );
+});
+
+test('collection service rejects writes when orchestration is enabled on an unsupported runtime', async () => {
+  const harness = await createCollectionServiceHarness(true, {
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  });
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+
+  class UnsupportedOrchestrationSafetyService extends TrackingSafetyService {
+    override isWindowsOrchestrationSupported(): boolean {
+      return false;
+    }
+  }
+
+  const safetyService = new UnsupportedOrchestrationSafetyService(false);
+  const collectionService = harness.createCollectionService(safetyService);
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  await assert.rejects(
+    () => collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true }),
+    /runtime is not supported|close Steam manually/i
+  );
+  assert.deepEqual(safetyService.calls, []);
+});
+
+test('collection service dry-run does not stop or restart Steam when orchestration is enabled', async () => {
+  const harness = await createCollectionServiceHarness(true, {
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  });
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const safetyService = new TrackingSafetyService(true);
+  const collectionService = harness.createCollectionService(safetyService);
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: true, requireSteamClosed: true });
+
+  assert.equal(result.dryRun, true);
+  assert.deepEqual(safetyService.calls, []);
+});
+
+test('collection service writes dirty stage first', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -254,7 +509,7 @@ test('collection service writes experimental dirty stage first', async () => {
     ]
   });
 
-  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true, experimentalFinalize: false });
+  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
 
   const updated = await readPairArrayDocument(harness.sourcePath);
   const racingWrapper = readPairArrayWrapper(updated, 'user-collections.uc-racing');
@@ -270,14 +525,14 @@ test('collection service writes experimental dirty stage first', async () => {
   assert.deepEqual(modifiedKeys, ['user-collections.uc-racing']);
   assert.deepEqual(beforeNamespaces, [[1, '1416'], [3, '0']]);
   assert.deepEqual(namespaces, [[1, '1417'], [3, '0']]);
-  assert.match(result.warnings.join(' '), /pending finalize/i);
+  assert.match(result.warnings.join(' '), /finalize=true to finalize/i);
 
   const persistedPlan = JSON.parse(await readFile(preview.plan.planPath, 'utf8')) as { expectedDirtySnapshotHash?: string };
   assert.equal(typeof persistedPlan.expectedDirtySnapshotHash, 'string');
   assert.ok((persistedPlan.expectedDirtySnapshotHash?.length ?? 0) > 0);
 });
 
-test('collection service finalizes experimental dirty state', async () => {
+test('collection service finalizes dirty state', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -292,12 +547,12 @@ test('collection service finalizes experimental dirty state', async () => {
     ]
   });
 
-  await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true, experimentalFinalize: false });
+  await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
   const persistedAfterDirty = JSON.parse(await readFile(preview.plan.planPath, 'utf8')) as { expectedDirtySnapshotHash?: string };
   assert.equal(typeof persistedAfterDirty.expectedDirtySnapshotHash, 'string');
   const dirtyNamespaces = JSON.parse(await readFile(harness.namespacePath, 'utf8')) as Array<[number, string]>;
 
-  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true, experimentalFinalize: true });
+  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true, finalize: true });
 
   const updated = await readPairArrayDocument(harness.sourcePath);
   const racingWrapper = readPairArrayWrapper(updated, 'user-collections.uc-racing');
@@ -311,7 +566,7 @@ test('collection service finalizes experimental dirty state', async () => {
   assert.deepEqual(namespaces, [[1, '1417'], [3, '0']]);
 });
 
-test('collection service stages hidden-only experimental changes', async () => {
+test('collection service stages hidden-only dirty-stage changes', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -328,8 +583,7 @@ test('collection service stages hidden-only experimental changes', async () => {
 
   const result = await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   const updated = await readPairArrayDocument(harness.sourcePath);
@@ -346,7 +600,7 @@ test('collection service stages hidden-only experimental changes', async () => {
   assert.deepEqual(namespaces, [[1, '1417'], [3, '0']]);
 });
 
-test('collection service materializes namespace metadata during experimental dirty stage when it is missing', async () => {
+test('collection service materializes namespace metadata during dirty stage when it is missing', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -365,8 +619,7 @@ test('collection service materializes namespace metadata during experimental dir
 
   const result = await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   const updated = await readPairArrayDocument(harness.sourcePath);
@@ -378,7 +631,7 @@ test('collection service materializes namespace metadata during experimental dir
   assert.deepEqual(namespaces, [[3, '0'], [1, '1']]);
 });
 
-test('collection service rejects experimental finalize when live snapshot drifts from persisted dirty snapshot', async () => {
+test('collection service rejects finalize when live snapshot drifts from persisted dirty snapshot', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -395,8 +648,7 @@ test('collection service rejects experimental finalize when live snapshot drifts
 
   await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   const dirtyDocument = await readPairArrayDocument(harness.sourcePath);
@@ -417,13 +669,13 @@ test('collection service rejects experimental finalize when live snapshot drifts
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
       requireSteamClosed: true,
-      experimentalFinalize: true
+      finalize: true
     }),
     /staged snapshot drifted after dirty stage/i
   );
 });
 
-test('collection service rejects experimental finalize when dirty snapshot hash is missing from the persisted plan', async () => {
+test('collection service rejects finalize when dirty snapshot hash is missing from the persisted plan', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -440,8 +692,7 @@ test('collection service rejects experimental finalize when dirty snapshot hash 
 
   await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   const persistedPlan = JSON.parse(await readFile(preview.plan.planPath, 'utf8')) as { expectedDirtySnapshotHash?: string };
@@ -452,13 +703,13 @@ test('collection service rejects experimental finalize when dirty snapshot hash 
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
       requireSteamClosed: true,
-      experimentalFinalize: true
+      finalize: true
     }),
     /requires a successful dirty stage/i
   );
 });
 
-test('collection service rejects experimental finalize when modified sidecar is missing but dirty wrapped entries remain', async () => {
+test('collection service rejects finalize when modified sidecar is missing but dirty wrapped entries remain', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -475,8 +726,7 @@ test('collection service rejects experimental finalize when modified sidecar is 
 
   await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   await writeFile(path.join(harness.fixture.cloudStorageDir, 'cloud-storage-namespace-1.modified.json'), '[]\n', 'utf8');
@@ -485,13 +735,13 @@ test('collection service rejects experimental finalize when modified sidecar is 
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
       requireSteamClosed: true,
-      experimentalFinalize: true
+      finalize: true
     }),
     /staged state appears corrupted/i
   );
 });
 
-test('collection service rejects experimental finalize when modified sidecar contains non-string entries', async () => {
+test('collection service rejects finalize when modified sidecar contains non-string entries', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -508,8 +758,7 @@ test('collection service rejects experimental finalize when modified sidecar con
 
   await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   await writeFile(
@@ -522,13 +771,13 @@ test('collection service rejects experimental finalize when modified sidecar con
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
       requireSteamClosed: true,
-      experimentalFinalize: true
+      finalize: true
     }),
     /must contain only string keys/i
   );
 });
 
-test('collection service rejects experimental finalize when modified sidecar keys do not match dirty wrapped entries', async () => {
+test('collection service rejects finalize when modified sidecar keys do not match dirty wrapped entries', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -549,8 +798,7 @@ test('collection service rejects experimental finalize when modified sidecar key
 
   await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   await writeFile(
@@ -563,13 +811,13 @@ test('collection service rejects experimental finalize when modified sidecar key
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
       requireSteamClosed: true,
-      experimentalFinalize: true
+      finalize: true
     }),
     /modified sidecar keys .* do not match dirty wrapped entries/i
   );
 });
 
-test('collection service leaves no-op experimental apply unchanged', async () => {
+test('collection service leaves no-op dirty stage unchanged', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -588,7 +836,7 @@ test('collection service leaves no-op experimental apply unchanged', async () =>
     ]
   });
 
-  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true, experimentalFinalize: false });
+  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
   assert.equal(result.backupPath, undefined);
   assert.equal(result.rollbackPath, undefined);
   assert.equal(await readFile(harness.sourcePath, 'utf8'), beforeDocumentText);
@@ -617,13 +865,12 @@ test('collection service finalizes cleanly after no-op dirty stage', async () =>
 
   const dirtyResult = await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
   const finalizeResult = await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
     requireSteamClosed: true,
-    experimentalFinalize: true
+    finalize: true
   });
 
   assert.equal(dirtyResult.backupPath, undefined);
@@ -635,7 +882,7 @@ test('collection service finalizes cleanly after no-op dirty stage', async () =>
   assert.deepEqual(await readModifiedKeys(harness.sourcePath), beforeModifiedKeys);
 });
 
-test('collection service rejects experimental staged sync for object-shaped cloudstorage documents', async () => {
+test('collection service rejects staged sync for object-shaped cloudstorage documents', async () => {
   const harness = await createCollectionServiceHarness();
   const collectionService = harness.createCollectionService();
 
@@ -652,14 +899,13 @@ test('collection service rejects experimental staged sync for object-shaped clou
   await assert.rejects(
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
-      requireSteamClosed: true,
-      experimentalFinalize: false
+      requireSteamClosed: true
     }),
     /pair-array cloudstorage format/i
   );
 });
 
-test('collection service rejects experimental finalize when namespace metadata is missing for dirty staged state', async () => {
+test('collection service rejects finalize when namespace metadata is missing for dirty staged state', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -676,8 +922,7 @@ test('collection service rejects experimental finalize when namespace metadata i
 
   await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   await writeFile(harness.namespacePath, `${JSON.stringify([[3, '0']], null, 2)}\n`, 'utf8');
@@ -686,13 +931,13 @@ test('collection service rejects experimental finalize when namespace metadata i
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
       requireSteamClosed: true,
-      experimentalFinalize: true
+      finalize: true
     }),
     /namespace metadata is missing for a dirty staged state/i
   );
 });
 
-test('collection service rejects experimental finalize when namespace metadata is invalid for dirty staged state', async () => {
+test('collection service rejects finalize when namespace metadata is invalid for dirty staged state', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -709,8 +954,7 @@ test('collection service rejects experimental finalize when namespace metadata i
 
   await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   await writeFile(harness.namespacePath, `${JSON.stringify([[1, 'bad-version'], [3, '0']], null, 2)}\n`, 'utf8');
@@ -719,7 +963,7 @@ test('collection service rejects experimental finalize when namespace metadata i
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
       requireSteamClosed: true,
-      experimentalFinalize: true
+      finalize: true
     }),
     /namespace metadata is invalid/i
   );
@@ -742,8 +986,7 @@ test('collection service rolls back finalize targets when post-write content ver
 
   await previewService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   class CorruptingFinalizeSafetyService extends SafetyService {
@@ -769,7 +1012,7 @@ test('collection service rolls back finalize targets when post-write content ver
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
       requireSteamClosed: true,
-      experimentalFinalize: true
+      finalize: true
     }),
     /did not match the expected content/i
   );
@@ -779,7 +1022,7 @@ test('collection service rolls back finalize targets when post-write content ver
   assert.deepEqual(await readModifiedKeys(harness.sourcePath), beforeModifiedKeys);
 });
 
-test('collection service requires Steam to be closed for experimental staged calls', async () => {
+test('collection service requires Steam to be closed for staged calls', async () => {
   const harness = await createCollectionServiceHarness();
   await rewriteCloudstorageAsPairArray(harness.sourcePath);
   const collectionService = harness.createCollectionService();
@@ -797,23 +1040,21 @@ test('collection service requires Steam to be closed for experimental staged cal
   await assert.rejects(
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
-      requireSteamClosed: false,
-      experimentalFinalize: false
+      requireSteamClosed: false
     }),
     /requires Steam to be closed/i
   );
 
   await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   await assert.rejects(
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
       requireSteamClosed: false,
-      experimentalFinalize: true
+      finalize: true
     }),
     /requires Steam to be closed/i
   );
@@ -825,6 +1066,7 @@ test('collection service ignores legacy favorite operations during apply', async
   const configService = new ConfigService(fixture.env);
   const discovery = new SteamDiscoveryService(configService.resolve());
   const sourcePath = path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json');
+  await rewriteCloudstorageAsPairArray(sourcePath);
   const backend = new CloudStorageJsonCollectionBackend(sourcePath, fixture.steamId);
   const registry = new CollectionBackendRegistry([backend]);
   const library = new LibraryService(
@@ -864,21 +1106,29 @@ test('collection service ignores legacy favorite operations during apply', async
   };
   await writeFile(preview.plan.planPath, `${JSON.stringify(persistedPlan, null, 2)}\n`, 'utf8');
 
-  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  const result = await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true,
+    finalize: true
+  });
   assert.equal(result.appliedOperationCount, 1);
 
-  const updated = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>;
-  assert.deepEqual(updated['user-collections.favorite'], ['620']);
-  const coop = updated['user-collections.uc-co-op'] as { apps: string[]; name: string };
+  const updated = await readPairArrayDocument(sourcePath);
+  const favorite = readPairArrayPayload(updated, 'user-collections.favorite') as { added: number[]; removed: number[] };
+  assert.deepEqual(favorite.added, [620]);
+  assert.deepEqual(favorite.removed, []);
+  const coop = readPairArrayPayload(updated, 'user-collections.uc-co-op') as { name: string; added: number[]; removed: number[] };
   assert.equal(coop.name, 'Co-op');
-  assert.deepEqual(coop.apps, ['620']);
+  assert.deepEqual(coop.added, [620]);
+  assert.deepEqual(coop.removed, []);
 });
 
-test('collection service merges env default protected groups into persisted plan policies', async () => {
+test('collection service merges env default protected collections into persisted plan policies', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
-  fixture.env.STEAM_DEFAULT_READ_ONLY_GROUPS = '["Puzzle"]';
-  fixture.env.STEAM_DEFAULT_IGNORE_GROUPS = '["Multiplayer"]';
+  fixture.env.STEAM_DEFAULT_READ_ONLY_COLLECTIONS = '["Puzzle"]';
+  fixture.env.STEAM_DEFAULT_IGNORE_COLLECTIONS = '["Multiplayer"]';
   const configService = new ConfigService(fixture.env);
   const discovery = new SteamDiscoveryService(configService.resolve());
   const sourcePath = path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json');
@@ -902,8 +1152,8 @@ test('collection service merges env default protected groups into persisted plan
 
   const preview = await collectionService.createPlan({
     mode: 'merge',
-    readOnlyGroups: ['Co-op'],
-    ignoreGroups: ['Backlog'],
+    readOnlyCollections: ['Co-op'],
+    ignoreCollections: ['Backlog'],
     rules: [
       {
         appIds: [620],
@@ -913,12 +1163,12 @@ test('collection service merges env default protected groups into persisted plan
   });
 
   assert.deepEqual(preview.plan.policies, {
-    readOnlyGroups: ['Co-op', 'Puzzle'],
-    ignoreGroups: ['Backlog', 'Multiplayer']
+    readOnlyCollections: ['Co-op', 'Puzzle'],
+    ignoreCollections: ['Backlog', 'Multiplayer']
   });
 });
 
-test('collection service excludes ignored-group games from explicit appId rules', async () => {
+test('collection service excludes ignored-collection games from explicit appId rules', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
   const configService = new ConfigService(fixture.env);
@@ -944,7 +1194,7 @@ test('collection service excludes ignored-group games from explicit appId rules'
 
   const preview = await collectionService.createPlan({
     mode: 'merge',
-    ignoreGroups: ['Multiplayer'],
+    ignoreCollections: ['Multiplayer'],
     rules: [
       {
         appIds: [440],
@@ -957,7 +1207,7 @@ test('collection service excludes ignored-group games from explicit appId rules'
   assert.deepEqual(preview.plan.operations, {});
 });
 
-test('collection service excludes ignored-group games from query rules', async () => {
+test('collection service excludes ignored-collection games from query rules', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
   const configService = new ConfigService(fixture.env);
@@ -983,7 +1233,7 @@ test('collection service excludes ignored-group games from query rules', async (
 
   const preview = await collectionService.createPlan({
     mode: 'merge',
-    ignoreGroups: ['Puzzle'],
+    ignoreCollections: ['Puzzle'],
     rules: [
       {
         query: 'portal',
@@ -1145,7 +1395,7 @@ test('collection service rolls back dirty targets when dirty write fails', async
   const beforePlanFileText = await readFile(preview.plan.planPath, 'utf8');
 
   await assert.rejects(
-    () => collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true, experimentalFinalize: false }),
+    () => collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true }),
     /dirty write failed/
   );
 
@@ -1177,8 +1427,7 @@ test('collection service leaves plan file unchanged on no-op dirty stage', async
 
   const result = await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
-    requireSteamClosed: true,
-    experimentalFinalize: false
+    requireSteamClosed: true
   });
 
   assert.equal(result.backupPath, undefined);
@@ -1235,8 +1484,7 @@ test('collection service deletes a newly created modified sidecar during partial
   await assert.rejects(
     () => collectionService.applyPlan(preview.plan.planId, {
       dryRun: false,
-      requireSteamClosed: true,
-      experimentalFinalize: false
+      requireSteamClosed: true
     }),
     /namespace write failed/
   );
@@ -1264,7 +1512,7 @@ test('collection service rolls back finalize targets when finalize write fails',
     ]
   });
 
-  await previewService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true, experimentalFinalize: false });
+  await previewService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
 
   class FailingFinalizeSafetyService extends SafetyService {
     override async atomicWrite(targetPath: string, content: string): Promise<void> {
@@ -1282,7 +1530,7 @@ test('collection service rolls back finalize targets when finalize write fails',
   const beforeModifiedKeys = await readModifiedKeys(harness.sourcePath);
 
   await assert.rejects(
-    () => collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true, experimentalFinalize: true }),
+    () => collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true, finalize: true }),
     /finalize write failed/
   );
 

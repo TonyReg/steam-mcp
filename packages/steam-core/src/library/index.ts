@@ -198,9 +198,9 @@ function buildGameRecord(
 }
 
 function filterGame(game: GameRecord, options: LibraryListOptions): boolean {
-  if (options.ignoreGroups?.length) {
-    const ignoredGroups = new Set(options.ignoreGroups.map((group) => normalizeCollectionName(group)));
-    if ((game.collections ?? []).some((collection) => ignoredGroups.has(normalizeCollectionName(collection)))) {
+  if (options.ignoreCollections?.length) {
+    const ignoredCollections = new Set(options.ignoreCollections.map((group) => normalizeCollectionName(group)));
+    if ((game.collections ?? []).some((collection) => ignoredCollections.has(normalizeCollectionName(collection)))) {
       return false;
     }
   }

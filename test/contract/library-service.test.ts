@@ -163,7 +163,7 @@ test('library service matches collection filters case-insensitively', async () =
   assert.deepEqual(multiplayer.games.map((game) => game.appId).sort((left, right) => left - right), [440, 570]);
 });
 
-test('library service ignores groups case-insensitively', async () => {
+test('library service ignores collections case-insensitively', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
   const config = new ConfigService(fixture.env).resolve();
@@ -180,7 +180,7 @@ test('library service ignores groups case-insensitively', async () => {
     new LinkService()
   );
 
-  const result = await library.list({ includeStoreMetadata: false, includeDeckStatus: false, ignoreGroups: [' multiplayer '], limit: 10 });
+  const result = await library.list({ includeStoreMetadata: false, includeDeckStatus: false, ignoreCollections: [' multiplayer '], limit: 10 });
   assert.deepEqual(result.games.map((game) => game.appId), [620]);
 });
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { ConfigService } from '@steam-mcp/steam-core';
+import { ConfigService } from '../../packages/steam-core/src/config/index.js';
 
 function createEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -14,29 +14,29 @@ function createEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   };
 }
 
-test('config service parses default protected groups from JSON arrays', () => {
+test('config service parses default protected collections from JSON arrays', () => {
   const config = new ConfigService(createEnv({
-    STEAM_DEFAULT_READ_ONLY_GROUPS: '[" Play ", "Completed", "play"]',
-    STEAM_DEFAULT_IGNORE_GROUPS: '["Disliked", " Never Again "]'
+    STEAM_DEFAULT_READ_ONLY_COLLECTIONS: '[" Play ", "Completed", "play"]',
+    STEAM_DEFAULT_IGNORE_COLLECTIONS: '["Disliked", " Never Again "]'
   })).resolve();
 
-  assert.deepEqual(config.defaultReadOnlyGroups, ['Completed', 'Play']);
-  assert.deepEqual(config.defaultIgnoreGroups, ['Disliked', 'Never Again']);
+  assert.deepEqual(config.defaultReadOnlyCollections, ['Completed', 'Play']);
+  assert.deepEqual(config.defaultIgnoreCollections, ['Disliked', 'Never Again']);
 });
 
-test('config service rejects invalid default protected group env values', () => {
+test('config service rejects invalid default protected collection env values', () => {
   assert.throws(
     () => new ConfigService(createEnv({
-      STEAM_DEFAULT_READ_ONLY_GROUPS: '{"group":"Puzzle"}'
+      STEAM_DEFAULT_READ_ONLY_COLLECTIONS: '{"group":"Puzzle"}'
     })).resolve(),
-    /STEAM_DEFAULT_READ_ONLY_GROUPS must be a JSON array of strings\./
+    /STEAM_DEFAULT_READ_ONLY_COLLECTIONS must be a JSON array of strings\./
   );
 
   assert.throws(
     () => new ConfigService(createEnv({
-      STEAM_DEFAULT_IGNORE_GROUPS: '["Puzzle", 42]'
+      STEAM_DEFAULT_IGNORE_COLLECTIONS: '["Puzzle", 42]'
     })).resolve(),
-    /STEAM_DEFAULT_IGNORE_GROUPS must be a JSON array of strings\./
+    /STEAM_DEFAULT_IGNORE_COLLECTIONS must be a JSON array of strings\./
   );
 });
 
@@ -58,4 +58,16 @@ test('config service trims blank Steam Web API key values to undefined', () => {
   })).resolve();
 
   assert.equal(config.steamWebApiKey, undefined);
+});
+
+test('config service parses Windows orchestration flag from env', () => {
+  assert.equal(new ConfigService(createEnv({
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  })).resolve().windowsOrchestrationEnabled, true);
+
+  assert.equal(new ConfigService(createEnv({
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '0'
+  })).resolve().windowsOrchestrationEnabled, false);
+
+  assert.equal(new ConfigService(createEnv()).resolve().windowsOrchestrationEnabled, false);
 });

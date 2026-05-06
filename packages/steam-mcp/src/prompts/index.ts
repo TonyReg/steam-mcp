@@ -61,7 +61,7 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
     'steam_collection_planner',
     {
       title: 'Steam collection planner',
-      description: 'Guide an agent through the safe, plan-first workflow for hidden flags, named collections, and request-scoped read-only or ignored groups.',
+      description: 'Guide an agent through the safe, plan-first workflow for hidden flags, named collections, and request-scoped read-only or ignored collections.',
       argsSchema: steamCollectionPlannerPromptArgs
     },
     (rawArgs: unknown) => {
@@ -80,11 +80,12 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               `Requested plan mode: ${mode ?? 'add-only'}.`,
               `Durable preview plans live under: ${config.stateDirectories.plansDir}`,
               'Workflow:',
-              '1. Call steam_status first and confirm the selected Steam user, cloudstorage-json backend, and whether Steam-owned writes are enabled.',
+              '1. Call steam_status first and confirm the selected Steam user, cloudstorage-json backend, whether Steam-owned writes are enabled via the explicit write-unlock, and whether Windows orchestration is enabled/supported.',
               '2. Use steam_library_search or steam_library_list to inspect the candidate games that match the request.',
               '3. Call steam_collection_plan to create a durable preview artifact. Review matchedGames, warnings, destructive status, and the durable plan identifier before proposing any apply step.',
-              '4. Do not call steam_collection_apply unless the user explicitly asks to mutate Steam-owned state and the write gate is enabled.',
-              '5. Remind the user that apply is backup-first, drift-checked, atomic, rollback-capable, and requires Steam to be closed by default.'
+              '4. Do not call steam_collection_apply unless the user explicitly asks to mutate Steam-owned state and the write gate (`STEAM_ENABLE_COLLECTION_WRITES=1`) is enabled.',
+              '5. Remind the user that `STEAM_ENABLE_COLLECTION_WRITES=1` remains the write-unlock / operator kill switch. `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` is only an optional Windows wrapper that can close Steam before each staged apply call and best-effort relaunch it afterward.',
+              '6. Remind the user that apply remains backup-first, drift-checked, atomic, rollback-capable, rejects `requireSteamClosed=false`, still uses the dirty-stage then finalize flow, and that any restart is best-effort only and does not mean Steam sync has completed.'
             ].join('\n')
           }
         }]

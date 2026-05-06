@@ -18,8 +18,8 @@ const steamCollectionPlanInputShape = {
   mode: planModeSchema.optional(),
   request: z.string().optional(),
   rules: z.array(steamCollectionRuleSchema).optional(),
-  readOnlyGroups: z.array(z.string()).optional(),
-  ignoreGroups: z.array(z.string()).optional()
+  readOnlyCollections: z.array(z.string()).optional(),
+  ignoreCollections: z.array(z.string()).optional()
 };
 
 const steamCollectionPlanArgsSchema = z.object(steamCollectionPlanInputShape);
@@ -30,7 +30,7 @@ export function registerSteamCollectionPlanTool(server: McpServer, context: Stea
     'steam_collection_plan',
     {
       title: 'Steam collection plan',
-      description: 'Create a durable preview plan for hidden flags and named collections, with request-scoped read-only or ignored groups, without mutating Steam state.',
+      description: 'Create a durable preview plan for hidden flags and named collections, with request-scoped read-only or ignored collections, without mutating Steam state.',
       inputSchema: steamCollectionPlanArgsSchema
     },
     async (rawArgs: unknown) => {

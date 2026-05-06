@@ -3,7 +3,7 @@ import { normalizeCollectionName, toCollectionNameSet, uniqueStrings } from '../
 
 export class RecommendService {
   rankSimilarLibraryGames(games: GameRecord[], request: SimilarRequest): SearchMatch<GameRecord>[] {
-    const ignoredCollections = toCollectionNameSet(request.ignoreGroups);
+    const ignoredCollections = toCollectionNameSet(request.ignoreCollections);
     const seedGames = this.resolveSeedGames(games, request, ignoredCollections);
     if (seedGames.length === 0) {
       return [];

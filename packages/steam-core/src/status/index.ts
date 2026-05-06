@@ -13,6 +13,7 @@ export class StatusService {
 
   async getStatus(): Promise<SteamStatusResult> {
     const runtimeConfig = this.configService.resolve();
+    const windowsOrchestrationSupported = this.safetyService.isWindowsOrchestrationSupported();
     const [config, discovery, steamRunning] = await Promise.all([
       this.configService.ensureStateDirectories(),
       this.discoveryService.discover(),
@@ -28,6 +29,16 @@ export class StatusService {
       warnings.push('Steam Web API key is available, but no Steam user is selected; owned-game metadata fallback is inactive until discovery resolves a user.');
     }
 
+    if (runtimeConfig.windowsOrchestrationEnabled && !windowsOrchestrationSupported) {
+      warnings.push('Windows orchestration is enabled, but this runtime is not supported. Close Steam manually before calling steam_collection_apply.');
+    }
+
+    const collectionApplySafe = applyEnabled && (
+      runtimeConfig.windowsOrchestrationEnabled
+        ? windowsOrchestrationSupported
+        : !steamRunning
+    );
+
     return {
       installDir: discovery.installDir,
       userIds: discovery.userIds,
@@ -37,7 +48,9 @@ export class StatusService {
       collectionBackendId: discovery.collectionBackendId,
       collectionSourcePath: discovery.collectionSourcePath,
       collectionApplyEnabled: applyEnabled,
-      collectionApplySafe: applyEnabled && !steamRunning,
+      collectionApplySafe,
+      windowsOrchestrationEnabled: runtimeConfig.windowsOrchestrationEnabled,
+      windowsOrchestrationSupported,
       stateDirectories: config,
       libraryFolders: discovery.libraryFolders,
       warnings: uniqueStrings(warnings)
