@@ -9,7 +9,20 @@ import { ensurePathInsideRoot, normalizeAbsolutePath } from '../utils.js';
 const execFile = promisify(execFileCallback);
 const COLLECTION_FILE_NAMES = new Set(['cloud-storage-namespace-1.json', 'cloud-storage-namespace-1.modified.json', 'cloud-storage-namespaces.json']);
 
+type ExecResult = Awaited<ReturnType<typeof execFile>>;
+
+type ShutdownAttemptResult = {
+
+  attempted: boolean;
+  forced: boolean;
+  succeeded: boolean;
+  detail: string;
+};
+
 export class SafetyService {
+  private lastSteamDetectorObservation: string | null = null;
+  private lastSteamShutdownAttempt: string | null = null;
+
   constructor(private readonly steamRunningDetector?: () => Promise<boolean>) {}
 
   protected async resolveCanonicalPath(targetPath: string): Promise<string> {
@@ -20,41 +33,181 @@ export class SafetyService {
     return os.platform() === 'win32';
   }
 
+  describeLastSteamShutdownAttempt(): string | null {
+    return this.lastSteamShutdownAttempt;
+  }
+
+  protected async runExecFile(file: string, args: string[]): Promise<ExecResult> {
+    return execFile(file, args);
+  }
+
+  private parseTasklistCsv(stdout: string, imageName: string): boolean {
+    const normalizedImageName = imageName.toLowerCase();
+
+    return stdout
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .some((line) => {
+        const [taskName] = this.parseCsvLine(line);
+        return taskName?.toLowerCase() === normalizedImageName;
+      });
+  }
+
+  private parseCsvLine(line: string): string[] {
+    const values: string[] = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let index = 0; index < line.length; index += 1) {
+      const character = line[index];
+
+      if (character === '"') {
+        if (inQuotes && line[index + 1] === '"') {
+          current += '"';
+          index += 1;
+          continue;
+        }
+
+        inQuotes = !inQuotes;
+        continue;
+      }
+
+      if (character === ',' && !inQuotes) {
+        values.push(current);
+        current = '';
+        continue;
+      }
+
+      current += character;
+    }
+
+    values.push(current);
+    return values;
+  }
+
+  private stringifyExecOutput(output: string | NodeJS.ArrayBufferView | undefined): string {
+    if (output === undefined) {
+      return '';
+    }
+
+    return typeof output === 'string' ? output : Buffer.from(output.buffer, output.byteOffset, output.byteLength).toString('utf8');
+  }
+
+  private formatExecDetail(error: unknown, fallbackResult?: ExecResult): string {
+    const errorWithStreams = error as NodeJS.ErrnoException & Partial<ExecResult> & { code?: number | string; signal?: NodeJS.Signals };
+    const stderr = this.stringifyExecOutput(errorWithStreams.stderr).trim() || this.stringifyExecOutput(fallbackResult?.stderr).trim();
+    if (stderr) {
+      return stderr;
+    }
+
+    const stdout = this.stringifyExecOutput(errorWithStreams.stdout).trim() || this.stringifyExecOutput(fallbackResult?.stdout).trim();
+    if (stdout) {
+      return stdout;
+    }
+
+    if (typeof errorWithStreams.code === 'number' || typeof errorWithStreams.code === 'string') {
+      return `exit ${String(errorWithStreams.code)}`;
+    }
+
+    if (errorWithStreams.signal) {
+      return `signal ${errorWithStreams.signal}`;
+    }
+
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return error.message.trim();
+    }
+
+    return 'unknown error';
+  }
+
+  private async runTaskkill(forced: boolean): Promise<ShutdownAttemptResult> {
+    const args = ['/IM', 'steam.exe', '/T'];
+    if (forced) {
+      args.push('/F');
+    }
+
+    try {
+      const result = await this.runExecFile('taskkill', args);
+      const detail = this.stringifyExecOutput(result.stdout).trim() || this.stringifyExecOutput(result.stderr).trim() || 'ok';
+      return { attempted: true, forced, succeeded: true, detail };
+    } catch (error) {
+      return {
+        attempted: true,
+        forced,
+        succeeded: false,
+        detail: this.formatExecDetail(error)
+      };
+    }
+  }
+
+  private formatShutdownAttempt(result: ShutdownAttemptResult): string {
+    const mode = result.forced ? 'forced taskkill' : 'graceful taskkill';
+    return result.succeeded ? `${mode} succeeded` : `${mode} failed: ${result.detail}`;
+  }
+
+  private summarizeShutdownAttempt(graceful: ShutdownAttemptResult, forced: ShutdownAttemptResult | null): string {
+    const forcedSummary = forced
+      ? forced.succeeded
+        ? 'yes (succeeded)'
+        : `yes (failed: ${forced.detail})`
+      : 'no';
+
+    return `${this.formatShutdownAttempt(graceful)}; forced taskkill attempted: ${forcedSummary}; last detector output: ${this.lastSteamDetectorObservation ?? 'unavailable'}`;
+  }
+
   async isSteamRunning(): Promise<boolean> {
     if (this.steamRunningDetector) {
-      return this.steamRunningDetector();
+      const running = await this.steamRunningDetector();
+      this.lastSteamDetectorObservation = running ? 'custom detector reported steam.exe present' : 'custom detector reported steam.exe absent';
+      return running;
     }
 
     if (!this.isWindowsOrchestrationSupported()) {
+      this.lastSteamDetectorObservation = 'steam detection unsupported on this runtime';
       return false;
     }
 
     try {
-      const result = await execFile('tasklist', ['/FI', 'IMAGENAME eq steam.exe']);
-      return result.stdout.toLowerCase().includes('steam.exe');
-    } catch {
+      const result = await this.runExecFile('tasklist', ['/FO', 'CSV', '/NH', '/FI', 'IMAGENAME eq steam.exe']);
+      const running = this.parseTasklistCsv(this.stringifyExecOutput(result.stdout), 'steam.exe');
+      this.lastSteamDetectorObservation = running ? 'steam.exe still present' : 'steam.exe absent';
+      return running;
+    } catch (error) {
+      this.lastSteamDetectorObservation = `tasklist failed: ${this.formatExecDetail(error)}`;
       return false;
     }
   }
 
   async stopSteamBestEffort(): Promise<boolean> {
+    this.lastSteamShutdownAttempt = null;
+
     if (!this.isWindowsOrchestrationSupported()) {
       return false;
     }
 
     if (!(await this.isSteamRunning())) {
+      this.lastSteamShutdownAttempt = 'Steam was already stopped before shutdown orchestration.';
       return true;
     }
 
-    try {
-      await execFile('taskkill', ['/IM', 'steam.exe', '/T']);
-      return true;
-    } catch {
-      return false;
+    const gracefulAttempt = await this.runTaskkill(false);
+    if (gracefulAttempt.succeeded) {
+      await delay(2_000);
     }
+
+    if (!(await this.isSteamRunning())) {
+      this.lastSteamShutdownAttempt = this.summarizeShutdownAttempt(gracefulAttempt, null);
+      return true;
+    }
+
+    const forcedAttempt = await this.runTaskkill(true);
+    const stopped = !(await this.isSteamRunning());
+    this.lastSteamShutdownAttempt = this.summarizeShutdownAttempt(gracefulAttempt, forcedAttempt);
+    return stopped;
   }
 
-  async waitForSteamStopped(timeoutMs = 15_000, pollIntervalMs = 250): Promise<boolean> {
+  async waitForSteamStopped(timeoutMs = 20_000, pollIntervalMs = 250): Promise<boolean> {
     return this.waitForSteamState(false, timeoutMs, pollIntervalMs);
   }
 
