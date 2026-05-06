@@ -1,4 +1,5 @@
 import type { GameRecord, SearchMatch, SimilarRequest, StoreSearchCandidate } from '../types.js';
+import { scoreLibraryQueryMatch } from '../search/index.js';
 import { normalizeCollectionName, toCollectionNameSet, uniqueStrings } from '../utils.js';
 
 export class RecommendService {
@@ -81,11 +82,13 @@ export class RecommendService {
     }
 
     if (request.query) {
-      const normalizedQuery = request.query.toLowerCase();
       return games
-        .filter((game) => game.name.toLowerCase().includes(normalizedQuery))
         .filter((game) => !isIgnoredByCollections(game, ignoredCollections))
-        .slice(0, 3);
+        .map((game) => scoreLibraryQueryMatch(game, request.query ?? ''))
+        .filter((match) => match.score > 0)
+        .sort((left, right) => right.score - left.score || left.item.name.localeCompare(right.item.name))
+        .slice(0, 3)
+        .map((match) => match.item);
     }
 
     return [];
