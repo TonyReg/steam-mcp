@@ -82,7 +82,14 @@ class TrackingSafetyService extends SafetyService {
   public readonly calls: string[] = [];
   private running: boolean;
 
-  constructor(initiallyRunning: boolean) {
+  constructor(
+    initiallyRunning: boolean,
+    private readonly options: {
+      forceFallback?: boolean;
+      stayRunningAfterStop?: boolean;
+      shutdownDiagnostics?: string | null;
+    } = {}
+  ) {
     super(async () => this.running);
     this.running = initiallyRunning;
   }
@@ -93,7 +100,15 @@ class TrackingSafetyService extends SafetyService {
 
   override async stopSteamBestEffort(): Promise<boolean> {
     this.calls.push('stopSteamBestEffort');
-    this.running = false;
+
+    if (this.options.forceFallback) {
+      this.calls.push('stopSteamBestEffort:forcedFallback');
+    }
+
+    if (!this.options.stayRunningAfterStop) {
+      this.running = false;
+    }
+
     return true;
   }
 
@@ -106,6 +121,10 @@ class TrackingSafetyService extends SafetyService {
     this.calls.push('startSteamBestEffort');
     this.running = true;
     return true;
+  }
+
+  override describeLastSteamShutdownAttempt(): string | null {
+    return this.options.shutdownDiagnostics ?? null;
   }
 }
 
@@ -424,6 +443,66 @@ test('collection service orchestration still attempts relaunch after inner apply
     /namespace write failed/
   );
   assert.deepEqual(safetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped', 'startSteamBestEffort']);
+});
+
+test('collection service orchestration continues after forced shutdown fallback succeeds', async () => {
+  const harness = await createCollectionServiceHarness(true, {
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  });
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const safetyService = new TrackingSafetyService(true, {
+    forceFallback: true,
+    shutdownDiagnostics: 'graceful taskkill exited with code 128; forced taskkill succeeded'
+  });
+  const collectionService = harness.createCollectionService(safetyService);
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+
+  assert.equal(result.appliedOperationCount, 1);
+  assert.deepEqual(safetyService.calls, [
+    'stopSteamBestEffort',
+    'stopSteamBestEffort:forcedFallback',
+    'waitForSteamStopped',
+    'startSteamBestEffort'
+  ]);
+});
+
+test('collection service orchestration failure surfaces shutdown diagnostics and avoids restart when close is unconfirmed', async () => {
+  const harness = await createCollectionServiceHarness(true, {
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  });
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const safetyService = new TrackingSafetyService(true, {
+    stayRunningAfterStop: true,
+    shutdownDiagnostics: 'graceful taskkill failed: access denied; forced taskkill attempted: yes; last detector output: steam.exe still present'
+  });
+  const collectionService = harness.createCollectionService(safetyService);
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  await assert.rejects(
+    () => collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true }),
+    /Windows orchestration could not confirm shutdown before steam_collection_apply\. graceful taskkill failed: access denied; forced taskkill attempted: yes; last detector output: steam\.exe still present/
+  );
+  assert.deepEqual(safetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped']);
 });
 
 test('collection service still rejects requireSteamClosed=false when orchestration is enabled', async () => {

@@ -165,7 +165,9 @@ export class CollectionService {
       await this.safetyService.stopSteamBestEffort();
       const steamStopped = await this.safetyService.waitForSteamStopped();
       if (!steamStopped) {
-        throw new Error('Steam appears to be running. Windows orchestration could not confirm shutdown before steam_collection_apply.');
+        const shutdownDiagnostics = this.safetyService.describeLastSteamShutdownAttempt();
+        const diagnosticSuffix = shutdownDiagnostics ? ` ${shutdownDiagnostics}` : '';
+        throw new Error(`Steam appears to be running. Windows orchestration could not confirm shutdown before steam_collection_apply.${diagnosticSuffix}`);
       }
 
       stoppedByWrapper = true;
