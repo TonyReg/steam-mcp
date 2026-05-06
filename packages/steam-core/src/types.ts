@@ -51,6 +51,7 @@ export interface CollectionPlan {
   snapshotHash: string;
   mode: PlanMode;
   operations: Record<string, CollectionPlanAppOperation>;
+  collectionDeletes: string[];
   policies: CollectionPlanPolicies;
   warnings: string[];
   sourceRequest?: string;
@@ -69,6 +70,8 @@ export interface CollectionSnapshot {
   rawMetadata: {
     backendKeyMap: Record<string, string>;
     displayNameMap: Record<string, string>;
+    collectionStateMap: Record<string, 'live' | 'tombstone'>;
+    tombstoneKeyMap: Record<string, string[]>;
   };
 }
 
@@ -79,6 +82,7 @@ export interface CollectionRule {
   addToCollections?: string[];
   removeFromCollections?: string[];
   setCollections?: string[];
+  deleteCollections?: string[];
   hidden?: boolean;
 }
 

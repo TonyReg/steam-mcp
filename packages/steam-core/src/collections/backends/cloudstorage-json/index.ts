@@ -369,11 +369,19 @@ function wrapPairArrayValue(
     return value;
   }
 
-  const payload = buildPairArrayPayload(key, value);
-  const nextValue = JSON.stringify(payload);
-
   const wrappedVersionMode = options.wrappedVersionMode ?? 'current';
   const shouldForceWrappedValue = options.forceWrappedKeys?.has(key) ?? false;
+  const tombstoneValue = toWrappedCollectionTombstone(key, value, previousValue, nextNamespaceValue, wrappedVersionMode);
+  if (tombstoneValue !== undefined) {
+    if (!shouldForceWrappedValue && !didCollectionPayloadChange(previousValue, tombstoneValue)) {
+      return previousValue ?? tombstoneValue;
+    }
+
+    return tombstoneValue;
+  }
+
+  const payload = buildPairArrayPayload(key, value);
+  const nextValue = JSON.stringify(payload);
 
   if (isWrappedCloudStorageEntry(value)) {
     if (!shouldForceWrappedValue && !didCollectionPayloadChange(previousValue, value)) {
@@ -396,7 +404,7 @@ function didCollectionPayloadChange(previousValue: unknown, nextValue: unknown):
     return true;
   }
 
-  return stableStringify(unwrapCollectionValue(previousValue)) !== stableStringify(unwrapCollectionValue(nextValue));
+  return stableStringify(normalizeCollectionPayloadForComparison(previousValue)) !== stableStringify(normalizeCollectionPayloadForComparison(nextValue));
 }
 
 function buildPairArrayPayload(key: string, value: unknown): unknown {
@@ -442,23 +450,35 @@ function buildSnapshot(
   const collectionsByApp = new Map<string, Set<string>>();
   const backendKeyMap: Record<string, string> = {};
   const displayNameMap: Record<string, string> = {};
+  const collectionStateMap: Record<string, 'live' | 'tombstone'> = {};
+  const tombstoneKeyMap: Record<string, string[]> = {};
 
   for (const [key, value] of Object.entries(document)) {
     if (!key.startsWith('user-collections.uc-')) {
       continue;
     }
 
-    const collectionName = readCollectionName(key, value);
+    const collectionState = isDeletedCollectionValue(value) ? 'tombstone' : 'live';
+    const collectionName = collectionState === 'tombstone'
+      ? readDeletedCollectionName(key)
+      : readCollectionName(key, value);
     const canonicalCollectionName = normalizeCollectionName(collectionName);
+    const existingState = collectionStateMap[canonicalCollectionName];
     const existingDisplayName = displayNameMap[canonicalCollectionName];
-    if (existingDisplayName && existingDisplayName !== collectionName) {
+
+    if (existingState) {
       throw new Error(
-        `Collection backend file ${sourcePath} contains ambiguous collection names ${existingDisplayName} and ${collectionName}.`
+        `Collection backend file ${sourcePath} contains ambiguous collection names ${existingDisplayName ?? canonicalCollectionName} and ${collectionName}.`
       );
     }
 
-    backendKeyMap[canonicalCollectionName] = key;
     displayNameMap[canonicalCollectionName] = collectionName;
+    collectionStateMap[canonicalCollectionName] = collectionState;
+    backendKeyMap[canonicalCollectionName] = key;
+
+    if (collectionState === 'tombstone') {
+      tombstoneKeyMap[canonicalCollectionName] = [...(tombstoneKeyMap[canonicalCollectionName] ?? []), key];
+    }
 
     for (const appId of membershipFromValue(value)) {
       const current = collectionsByApp.get(appId) ?? new Set<string>();
@@ -489,7 +509,9 @@ function buildSnapshot(
     hiddenByApp,
     rawMetadata: {
       backendKeyMap,
-      displayNameMap
+      displayNameMap,
+      collectionStateMap,
+      tombstoneKeyMap
     }
   };
 }
@@ -546,18 +568,41 @@ function readCollectionName(key: string, value: unknown): string {
   return key.replace('user-collections.uc-', '');
 }
 
+function readDeletedCollectionName(key: string): string {
+  const fallbackName = key.replace('user-collections.uc-', '');
+  return fallbackName
+    .split('-')
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+}
+
 function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, snapshot: CollectionSnapshot): CloudStorageDocument {
   const nextDocument = structuredClone(document);
+  const liveSnapshot = buildSnapshot(document, snapshot.sourcePath, snapshot.steamId, snapshot.backendId);
+  const deletedCanonicals = new Set((plan.collectionDeletes ?? []).map((collectionName) => normalizeCollectionName(collectionName)));
 
-  const hidden = new Set<string>(Object.keys(snapshot.hiddenByApp).filter((appId) => snapshot.hiddenByApp[appId]));
+  const hidden = new Set<string>(Object.keys(liveSnapshot.hiddenByApp).filter((appId) => liveSnapshot.hiddenByApp[appId]));
   const collections = new Map<string, Set<string>>();
   const protectedCollections = new Set<string>([
     ...toCollectionNameSet(plan.policies.readOnlyCollections),
     ...toCollectionNameSet(plan.policies.ignoreCollections)
   ]);
 
-  for (const [appId, collectionNames] of Object.entries(snapshot.collectionsByApp)) {
+  for (const [appId, collectionNames] of Object.entries(liveSnapshot.collectionsByApp)) {
     collections.set(appId, new Set(collectionNames));
+  }
+
+  for (const collectionName of plan.collectionDeletes ?? []) {
+    for (const collectionSet of collections.values()) {
+      deleteCollectionByCanonicalName(collectionSet, collectionName);
+    }
+
+    const backendKey = resolveBackendKey(collectionName, liveSnapshot);
+    const existingValue = nextDocument[backendKey];
+    if (existingValue !== undefined && !isDeletedCollectionValue(existingValue)) {
+      nextDocument[backendKey] = createDeletedCollectionValue(backendKey, existingValue);
+    }
   }
 
   for (const operation of Object.values(plan.operations)) {
@@ -580,7 +625,7 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
           continue;
         }
 
-        currentCollections.add(resolveSnapshotCollectionName(collectionName, snapshot));
+        currentCollections.add(resolveSnapshotCollectionName(collectionName, liveSnapshot));
       }
 
       rehydrateProtectedMemberships(currentCollections, protectedMemberships);
@@ -591,7 +636,7 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
         continue;
       }
 
-      currentCollections.add(resolveSnapshotCollectionName(collectionName, snapshot));
+      currentCollections.add(resolveSnapshotCollectionName(collectionName, liveSnapshot));
     }
 
     for (const collectionName of operation.collectionsToRemove ?? []) {
@@ -603,13 +648,15 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
     }
 
     rehydrateProtectedMemberships(currentCollections, protectedMemberships);
-
     collections.set(appId, currentCollections);
   }
 
   nextDocument['user-collections.hidden'] = rewriteMembershipValue(nextDocument['user-collections.hidden'], hidden);
 
-  const collectionNames = uniqueCollectionNames(new Set([...Object.values(snapshot.collectionsByApp).flat(), ...[...collections.values()].flatMap((set) => [...set]) ]));
+  const collectionNames = uniqueCollectionNames(new Set([
+    ...Object.values(liveSnapshot.rawMetadata.displayNameMap),
+    ...[...collections.values()].flatMap((set) => [...set])
+  ]));
   const appsByCollection = new Map<string, Set<string>>();
 
   for (const [appId, collectionSet] of collections.entries()) {
@@ -621,9 +668,18 @@ function updateDocument(document: CloudStorageDocument, plan: CollectionPlan, sn
   }
 
   for (const collectionName of collectionNames) {
-    const backendKey = resolveBackendKey(collectionName, snapshot);
+    if (deletedCanonicals.has(normalizeCollectionName(collectionName))) {
+      continue;
+    }
+
+    const members = appsByCollection.get(collectionName);
+    if (!members || members.size === 0) {
+      continue;
+    }
+
+    const backendKey = resolveBackendKey(collectionName, liveSnapshot);
     const existingValue = nextDocument[backendKey];
-    nextDocument[backendKey] = rewriteNamedCollectionValue(existingValue, collectionName, appsByCollection.get(collectionName) ?? new Set<string>());
+    nextDocument[backendKey] = rewriteNamedCollectionValue(existingValue, collectionName, members);
   }
 
   return nextDocument;
@@ -733,8 +789,37 @@ function resolveSnapshotCollectionName(collectionName: string, snapshot: Collect
   return snapshot.rawMetadata.displayNameMap[normalizeCollectionName(collectionName)] ?? collectionName.trim();
 }
 
+function createDeletedCollectionValue(backendKey: string, original: unknown): unknown {
+  if (isWrappedCloudStorageEntry(original)) {
+    return {
+      key: backendKey,
+      timestamp: Math.floor(Date.now() / 1000),
+      is_deleted: true,
+      version: original.version ?? '1'
+    };
+  }
+
+  return {
+    key: backendKey,
+    timestamp: Math.floor(Date.now() / 1000),
+    is_deleted: true,
+    version: '1'
+  };
+}
+
 function resolveBackendKey(collectionName: string, snapshot: CollectionSnapshot): string {
-  return snapshot.rawMetadata.backendKeyMap[normalizeCollectionName(collectionName)] ?? `user-collections.uc-${slugify(collectionName)}`;
+  const canonicalCollectionName = normalizeCollectionName(collectionName);
+  const liveKey = snapshot.rawMetadata.backendKeyMap[canonicalCollectionName];
+  if (liveKey) {
+    return liveKey;
+  }
+
+  const tombstoneKeys = snapshot.rawMetadata.tombstoneKeyMap[canonicalCollectionName] ?? [];
+  if (tombstoneKeys.length > 1) {
+    throw new Error(`Collection backend file ${snapshot.sourcePath} contains ambiguous collection names for ${collectionName.trim()}.`);
+  }
+
+  return tombstoneKeys[0] ?? `user-collections.uc-${slugify(collectionName)}`;
 }
 
 function getProtectedMemberships(currentCollections: Set<string>, protectedCollections: Set<string>): string[] {
@@ -811,9 +896,10 @@ function rewriteMembershipValue(original: unknown, members: Set<string>): unknow
 function rewriteNamedCollectionValue(original: unknown, collectionName: string, members: Set<string>): unknown {
   const sortedMembers = uniqueStrings(members);
   const normalizedOriginal = unwrapCollectionValue(original);
+  const resolvedCollectionName = resolveExistingCollectionDisplayName(original, collectionName);
 
   if (isWrappedCloudStorageEntry(original)) {
-    const nextPayload = rewriteNamedCollectionPayload(normalizedOriginal, collectionName, sortedMembers, original.key);
+    const nextPayload = rewriteNamedCollectionPayload(normalizedOriginal, resolvedCollectionName, sortedMembers, original.key);
     return refreshWrappedCloudStorageValue(original, JSON.stringify(nextPayload));
   }
 
@@ -822,7 +908,7 @@ function rewriteNamedCollectionValue(original: unknown, collectionName: string, 
       if (nestedKey in normalizedOriginal) {
         return {
           ...normalizedOriginal,
-          name: typeof normalizedOriginal.name === 'string' ? normalizedOriginal.name : collectionName,
+          name: typeof normalizedOriginal.name === 'string' ? normalizedOriginal.name : resolvedCollectionName,
           [nestedKey]: rewriteMembershipValue(normalizedOriginal[nestedKey], members)
         };
       }
@@ -830,24 +916,43 @@ function rewriteNamedCollectionValue(original: unknown, collectionName: string, 
 
     const numericKeys = Object.keys(normalizedOriginal).filter((key) => /^\d+$/.test(key));
     if (numericKeys.length > 0) {
-      return rewriteMembershipValue({ ...normalizedOriginal, name: normalizedOriginal.name ?? collectionName }, members);
+      return rewriteMembershipValue({ ...normalizedOriginal, name: normalizedOriginal.name ?? resolvedCollectionName }, members);
     }
 
     if ('added' in normalizedOriginal || 'removed' in normalizedOriginal) {
-      return rewriteNamedCollectionPayload(normalizedOriginal, collectionName, sortedMembers);
+      return rewriteNamedCollectionPayload(normalizedOriginal, resolvedCollectionName, sortedMembers);
     }
 
     return {
       ...normalizedOriginal,
-      name: typeof normalizedOriginal.name === 'string' ? normalizedOriginal.name : collectionName,
+      name: typeof normalizedOriginal.name === 'string' ? normalizedOriginal.name : resolvedCollectionName,
       apps: sortedMembers
     };
   }
 
   return {
-    name: collectionName,
+    name: resolvedCollectionName,
     apps: sortedMembers
   };
+}
+
+function resolveExistingCollectionDisplayName(original: unknown, collectionName: string): string {
+  const normalizedOriginal = unwrapCollectionValue(original);
+  if (isRecord(normalizedOriginal)) {
+    if (typeof normalizedOriginal.name === 'string' && normalizedOriginal.name.trim() !== '') {
+      return normalizedOriginal.name;
+    }
+
+    if (typeof normalizedOriginal.title === 'string' && normalizedOriginal.title.trim() !== '') {
+      return normalizedOriginal.title;
+    }
+  }
+
+  if (isWrappedCloudStorageEntry(original) && isDeletedCollectionValue(original)) {
+    return readDeletedCollectionName(original.key);
+  }
+
+  return collectionName.trim();
 }
 
 function rewriteMembershipPayload(original: unknown, sortedMembers: string[]): unknown {
@@ -900,12 +1005,13 @@ function refreshWrappedCloudStorageValue(
     ? null
     : normalizeWrappedVersion(nextVersion ?? original.version);
 
-  if (original.value === nextValue && original.version === resolvedVersion) {
+  if (original.value === nextValue && original.version === resolvedVersion && toBoolean(original.is_deleted) !== true) {
     return original;
   }
 
+  const { is_deleted: _ignored, ...rest } = original;
   return {
-    ...original,
+    ...rest,
     timestamp: Math.floor(Date.now() / 1000),
     value: nextValue,
     version: resolvedVersion
@@ -930,6 +1036,46 @@ function serializeMembershipArray(sortedMembers: string[], preferNumeric = false
   }
 
   return sortedMembers;
+}
+
+function isDeletedCollectionValue(value: unknown): boolean {
+  return isWrappedCloudStorageEntry(value) && toBoolean(value.is_deleted) === true && !('value' in value);
+}
+
+function toWrappedCollectionTombstone(
+  key: string,
+  value: unknown,
+  previousValue: unknown,
+  nextNamespaceValue: string | undefined,
+  wrappedVersionMode: WrappedVersionMode
+): unknown | undefined {
+  if (!isDeletedCollectionValue(value)) {
+    return undefined;
+  }
+
+  if (isWrappedCloudStorageEntry(previousValue)) {
+    return {
+      key,
+      timestamp: Math.floor(Date.now() / 1000),
+      is_deleted: true,
+      version: wrappedVersionMode === 'dirty' ? null : normalizeWrappedVersion(nextNamespaceValue ?? previousValue.version)
+    };
+  }
+
+  return {
+    key,
+    timestamp: Math.floor(Date.now() / 1000),
+    is_deleted: true,
+    version: wrappedVersionMode === 'dirty' ? null : normalizeWrappedVersion(nextNamespaceValue)
+  };
+}
+
+function normalizeCollectionPayloadForComparison(value: unknown): unknown {
+  if (isDeletedCollectionValue(value)) {
+    return { is_deleted: true };
+  }
+
+  return unwrapCollectionValue(value);
 }
 
 export const cloudStorageJsonInternals = {

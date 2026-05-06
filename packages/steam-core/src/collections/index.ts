@@ -12,6 +12,7 @@ import type {
   CollectionPlanPreview,
   CollectionPlanRequest,
   CollectionRule,
+  CollectionSnapshot,
   GameRecord,
   PlanMode
 } from '../types.js';
@@ -60,10 +61,12 @@ export class CollectionService {
         limit: 5000
       })
     ]);
+    const mode = request.mode ?? 'add-only';
     const rules = normalizeRules(request);
     const warnings = [...snapshot.sourcePath ? [] : ['Collection source path is missing.']];
     const operations: CollectionPlan['operations'] = {};
     const matchedGames: GameRecord[] = [];
+    const collectionDeletes = collectCollectionDeletes(rules, mode, policies, snapshot, warnings);
 
     for (const rule of rules) {
       const resolvedGames = await this.resolveRuleGames(rule, library.games);
@@ -71,12 +74,15 @@ export class CollectionService {
         matchedGames.push(game);
         const key = appIdString(game.appId);
         const current = operations[key] ?? { appId: game.appId };
-        const next = applyRuleToOperation(current, rule, request.mode ?? 'add-only', policies, warnings);
+        const next = applyRuleToOperation(current, rule, mode, policies, warnings);
         operations[key] = next;
       }
     }
 
-    const destructive = (request.mode ?? 'add-only') === 'replace'
+    assertNoCollectionDeleteConflicts(collectionDeletes, operations);
+
+    const destructive = mode === 'replace'
+      || collectionDeletes.length > 0
       || Object.values(operations).some((operation) => (operation.collectionsToRemove?.length ?? 0) > 0 || operation.hidden === false);
     if (destructive) {
       warnings.push('Plan contains destructive changes. Review carefully before apply.');
@@ -90,8 +96,9 @@ export class CollectionService {
       backendId: snapshot.backendId,
       steamId: discovery.selectedUserId,
       snapshotHash: snapshot.snapshotHash,
-      mode: request.mode ?? 'add-only',
+      mode,
       operations,
+      collectionDeletes,
       policies,
       warnings: uniqueStrings(warnings),
       sourceRequest: request.request,
@@ -374,8 +381,86 @@ function normalizePolicies(request: Pick<CollectionPlanRequest, 'readOnlyCollect
 function normalizePersistedPlan(plan: CollectionPlan): CollectionPlan {
   return {
     ...plan,
+    collectionDeletes: uniqueCollectionNames(plan.collectionDeletes ?? []),
     policies: normalizePolicies(plan.policies ?? { readOnlyCollections: [], ignoreCollections: [] })
   };
+}
+
+function resolveSnapshotDisplayName(collectionName: string, snapshot: CollectionSnapshot): string {
+  return snapshot.rawMetadata.displayNameMap[normalizeCollectionName(collectionName)] ?? collectionName.trim();
+}
+
+function collectCollectionDeletes(
+  rules: CollectionRule[],
+  mode: PlanMode,
+  policies: CollectionPlanPolicies,
+  snapshot: CollectionSnapshot,
+  warnings: string[]
+): string[] {
+  const protectedCollections = new Set<string>([
+    ...toCollectionNameSet(policies.readOnlyCollections),
+    ...toCollectionNameSet(policies.ignoreCollections)
+  ]);
+  const deletedCollections: string[] = [];
+
+  for (const rule of rules) {
+    for (const collectionName of uniqueCollectionNames(rule.deleteCollections ?? [])) {
+      const canonicalCollectionName = normalizeCollectionName(collectionName);
+      if (canonicalCollectionName === 'favorite' || canonicalCollectionName === 'hidden') {
+        throw new Error(`Cannot delete built-in collection ${collectionName.trim()}.`);
+      }
+
+      if (mode === 'add-only') {
+        warnings.push(`Ignoring destructive collection deletes in add-only mode: ${collectionName.trim()}.`);
+        continue;
+      }
+
+      if (protectedCollections.has(canonicalCollectionName)) {
+        warnings.push(`Ignoring protected collection ${collectionName.trim()} during delete.`);
+        continue;
+      }
+
+      const collectionState = snapshot.rawMetadata.collectionStateMap[canonicalCollectionName];
+      if (collectionState === 'tombstone') {
+        warnings.push(`Collection ${resolveSnapshotDisplayName(collectionName, snapshot)} is already deleted.`);
+        continue;
+      }
+
+      if (collectionState !== 'live') {
+        warnings.push(`Collection ${collectionName.trim()} does not exist and cannot be deleted.`);
+        continue;
+      }
+
+      deletedCollections.push(resolveSnapshotDisplayName(collectionName, snapshot));
+    }
+  }
+
+  return uniqueCollectionNames(deletedCollections);
+}
+
+function assertNoCollectionDeleteConflicts(
+  collectionDeletes: string[],
+  operations: CollectionPlan['operations']
+): void {
+  if (collectionDeletes.length === 0) {
+    return;
+  }
+
+  const deletedCanonicalNames = new Set(toCollectionNameSet(collectionDeletes));
+  for (const operation of Object.values(operations)) {
+    const touchedCollections = uniqueCollectionNames([
+      ...(operation.collectionsToAdd ?? []),
+      ...(operation.collectionsToRemove ?? []),
+      ...(operation.collectionsSet ?? [])
+    ]);
+
+    for (const collectionName of touchedCollections) {
+      const canonicalCollectionName = normalizeCollectionName(collectionName);
+      if (deletedCanonicalNames.has(canonicalCollectionName)) {
+        throw new Error(`Plan cannot both delete and modify collection ${canonicalCollectionName}.`);
+      }
+    }
+  }
 }
 
 function applyRuleToOperation(
