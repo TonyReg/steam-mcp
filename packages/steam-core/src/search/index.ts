@@ -7,36 +7,7 @@ export class SearchService {
     const ignoredCollections = new Set((options.ignoreCollections ?? []).map((group) => normalizeCollectionName(group)));
     const results = games
       .filter((game) => this.filterGame(game, options, ignoredCollections))
-      .map((game) => {
-        const reasons: string[] = [];
-        let score = 0;
-        const normalizedName = game.name.toLowerCase();
-
-        if (normalizedName === query) {
-          score += 100;
-          reasons.push('exact name match');
-        } else if (normalizedName.startsWith(query)) {
-          score += 80;
-          reasons.push('prefix name match');
-        } else if (normalizedName.includes(query)) {
-          score += 60;
-          reasons.push('name contains query');
-        }
-
-        const collections = game.collections ?? [];
-        if (collections.some((collection) => collection.toLowerCase().includes(query))) {
-          score += 20;
-          reasons.push('collection match');
-        }
-
-        const tags = game.tags ?? [];
-        if (tags.some((tag) => tag.toLowerCase().includes(query))) {
-          score += 15;
-          reasons.push('tag match');
-        }
-
-        return { item: game, score, reasons } satisfies SearchMatch<GameRecord>;
-      })
+      .map((game) => scoreLibraryQueryMatch(game, query))
       .filter((match) => match.score > 0)
       .sort((left, right) => right.score - left.score || left.item.name.localeCompare(right.item.name));
 
@@ -76,4 +47,44 @@ export class SearchService {
 
     return true;
   }
+}
+
+export function scoreLibraryQueryMatch(game: GameRecord, rawQuery: string): SearchMatch<GameRecord> {
+  const query = normalizeWhitespace(rawQuery).toLowerCase();
+  const reasons: string[] = [];
+  let score = 0;
+  const normalizedName = game.name.toLowerCase();
+
+  if (normalizedName === query) {
+    score += 100;
+    reasons.push('exact name match');
+  } else if (normalizedName.startsWith(query)) {
+    score += 80;
+    reasons.push('prefix name match');
+  } else if (normalizedName.includes(query)) {
+    score += 60;
+    reasons.push('name contains query');
+  }
+
+  if ((game.collections ?? []).some((collection) => collection.toLowerCase().includes(query))) {
+    score += 20;
+    reasons.push('collection match');
+  }
+
+  if ((game.tags ?? []).some((tag) => tag.toLowerCase().includes(query))) {
+    score += 15;
+    reasons.push('tag match');
+  }
+
+  if ((game.genres ?? []).some((genre) => genre.toLowerCase().includes(query))) {
+    score += 15;
+    reasons.push('genre match');
+  }
+
+  if ((game.categories ?? []).some((category) => category.toLowerCase().includes(query))) {
+    score += 15;
+    reasons.push('category match');
+  }
+
+  return { item: game, score, reasons } satisfies SearchMatch<GameRecord>;
 }

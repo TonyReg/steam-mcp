@@ -91,6 +91,45 @@ test('library service enriches collection-only app ids from store metadata', asy
   assert.equal(hotWheels2.storeUrl, 'https://store.steampowered.com/app/2051120/');
 });
 
+test('library service exposes store genres for broad query matching on collection-only app ids', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  const sourcePath = path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json');
+  const document = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>;
+  document['user-collections.uc-racing'] = {
+    name: 'Backlog',
+    apps: ['2051120']
+  };
+  await writeFile(sourcePath, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
+
+  const appDetailsPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-2051120.json'), 'utf8');
+  const config = new ConfigService(fixture.env).resolve();
+  const discovery = new SteamDiscoveryService(config);
+  const backend = new CloudStorageJsonCollectionBackend(sourcePath, fixture.steamId);
+  const library = new LibraryService(
+    discovery,
+    new CollectionBackendRegistry([backend]),
+    new StoreClient(async (input) => {
+      const url = new URL(String(input));
+      if (url.searchParams.get('appids') === '2051120') {
+        return new Response(appDetailsPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+      }
+
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }),
+    new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new LinkService()
+  );
+
+  const result = await library.list({ includeStoreMetadata: true, includeDeckStatus: false, limit: 10 });
+  const hotWheels2 = result.games.find((game) => game.appId === 2051120);
+  assert.ok(hotWheels2);
+  assert.deepEqual(hotWheels2.collections, ['Backlog']);
+  assert.deepEqual(hotWheels2.genres, ['Racing']);
+  assert.deepEqual(hotWheels2.categories, ['Single-player']);
+  assert.deepEqual((hotWheels2.tags ?? []).slice().sort((left, right) => left.localeCompare(right)), ['Arcade', 'Racing']);
+});
+
 test('library service enriches collection-only app ids from sparse metadata fallback payloads', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);

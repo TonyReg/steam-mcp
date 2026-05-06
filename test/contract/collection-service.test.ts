@@ -1246,7 +1246,7 @@ test('collection service excludes ignored-collection games from query rules', as
   assert.deepEqual(preview.plan.operations, {});
 });
 
-test('collection service query rules match store tags when store metadata is available', async () => {
+test('collection service query rules match store genres when store metadata is available', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
   const appDetailsPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-620.json'), 'utf8');
@@ -1282,7 +1282,7 @@ test('collection service query rules match store tags when store metadata is ava
     mode: 'merge',
     rules: [
       {
-        query: 'co-op',
+        query: 'adventure',
         addToCollections: ['Backlog']
       }
     ]
@@ -1290,7 +1290,8 @@ test('collection service query rules match store tags when store metadata is ava
 
   assert.deepEqual(preview.matchedGames.map((game) => game.appId), [620]);
   assert.equal(preview.matchedGames[0]?.name, 'Portal 2');
-  assert.deepEqual((preview.matchedGames[0]?.tags ?? []).slice().sort((left, right) => left.localeCompare(right)), ['Co-op', 'Puzzle']);
+  assert.deepEqual(preview.matchedGames[0]?.genres, ['Adventure', 'Puzzle']);
+  assert.deepEqual(preview.matchedGames[0]?.tags, ['Co-op', 'Puzzle']);
   assert.deepEqual(preview.plan.operations, {
     '620': {
       appId: 620,
