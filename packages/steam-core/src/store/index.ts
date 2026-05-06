@@ -1,14 +1,52 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { DeckStatusProvider } from '../deck/index.js';
-import type { DeckStatus, StoreAppDetails, StoreSearchCandidate, StoreSearchOptions } from '../types.js';
+import type { StoreAppDetails, StoreSearchCandidate, StoreSearchOptions } from '../types.js';
 import { isRecord, uniqueStrings } from '../utils.js';
 
+interface CachedAppDetails {
+  details: StoreAppDetails;
+  updatedAtMs: number;
+}
+
+interface PersistedAppDetailsCacheEntry {
+  updatedAt: string;
+  details: StoreAppDetails;
+}
+
+export interface StoreClientOptions {
+  cacheDir?: string;
+  cacheTtlMs?: number;
+  now?: () => Date;
+}
+
+const DEFAULT_APP_DETAILS_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 export class StoreClient {
-  private readonly detailCache = new Map<number, StoreAppDetails>();
+  private readonly detailCache = new Map<number, CachedAppDetails>();
+  private readonly deckStatusProvider?: DeckStatusProvider;
+  private readonly cacheDir?: string;
+  private readonly cacheTtlMs: number;
+  private readonly now: () => Date;
 
   constructor(
     private readonly fetchImpl: typeof fetch = fetch,
-    private readonly deckStatusProvider?: DeckStatusProvider
-  ) {}
+    deckStatusProviderOrOptions?: DeckStatusProvider | StoreClientOptions,
+    options: StoreClientOptions = {}
+  ) {
+    if (isStoreClientOptions(deckStatusProviderOrOptions)) {
+      this.deckStatusProvider = undefined;
+      this.cacheDir = deckStatusProviderOrOptions.cacheDir;
+      this.cacheTtlMs = deckStatusProviderOrOptions.cacheTtlMs ?? DEFAULT_APP_DETAILS_CACHE_TTL_MS;
+      this.now = deckStatusProviderOrOptions.now ?? (() => new Date());
+      return;
+    }
+
+    this.deckStatusProvider = deckStatusProviderOrOptions;
+    this.cacheDir = options.cacheDir;
+    this.cacheTtlMs = options.cacheTtlMs ?? DEFAULT_APP_DETAILS_CACHE_TTL_MS;
+    this.now = options.now ?? (() => new Date());
+  }
 
   async search(options: StoreSearchOptions): Promise<StoreSearchCandidate[]> {
     const url = new URL('https://store.steampowered.com/api/storesearch/');
@@ -40,11 +78,40 @@ export class StoreClient {
   }
 
   async getAppDetails(appId: number): Promise<StoreAppDetails | undefined> {
+    const cached = await this.getCachedDetails(appId);
+    if (cached && !this.isExpired(cached)) {
+      return cached.details;
+    }
+
+    const refreshed = await this.fetchAppDetails(appId);
+    if (refreshed) {
+      this.detailCache.set(appId, refreshed);
+      await this.persistCacheEntry(appId, refreshed);
+      return refreshed.details;
+    }
+
+    return cached?.details;
+  }
+
+  private async getCachedDetails(appId: number): Promise<CachedAppDetails | undefined> {
     const cached = this.detailCache.get(appId);
     if (cached) {
       return cached;
     }
 
+    const persisted = await this.readPersistedCacheEntry(appId);
+    if (persisted) {
+      this.detailCache.set(appId, persisted);
+    }
+
+    return persisted;
+  }
+
+  private isExpired(entry: CachedAppDetails): boolean {
+    return this.now().getTime() - entry.updatedAtMs >= this.cacheTtlMs;
+  }
+
+  private async fetchAppDetails(appId: number): Promise<CachedAppDetails | undefined> {
     const url = new URL('https://store.steampowered.com/api/appdetails');
     url.searchParams.set('appids', String(appId));
     url.searchParams.set('l', 'english');
@@ -57,11 +124,49 @@ export class StoreClient {
 
     const payload = (await response.json()) as unknown;
     const details = normalizeAppDetails(appId, payload);
-    if (details) {
-      this.detailCache.set(appId, details);
+    if (!details) {
+      return undefined;
     }
-    return details;
+
+    return {
+      details,
+      updatedAtMs: this.now().getTime()
+    };
   }
+
+  private async readPersistedCacheEntry(appId: number): Promise<CachedAppDetails | undefined> {
+    if (!this.cacheDir) {
+      return undefined;
+    }
+
+    try {
+      const payload = JSON.parse(await readFile(this.getCacheEntryPath(appId), 'utf8')) as unknown;
+      return readPersistedCacheEntry(payload, appId);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async persistCacheEntry(appId: number, entry: CachedAppDetails): Promise<void> {
+    if (!this.cacheDir) {
+      return;
+    }
+
+    await mkdir(this.cacheDir, { recursive: true });
+    const payload: PersistedAppDetailsCacheEntry = {
+      updatedAt: new Date(entry.updatedAtMs).toISOString(),
+      details: entry.details
+    };
+    await writeFile(this.getCacheEntryPath(appId), `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  }
+
+  private getCacheEntryPath(appId: number): string {
+    return path.join(this.cacheDir ?? '', `${appId}.json`);
+  }
+}
+
+function isStoreClientOptions(value: DeckStatusProvider | StoreClientOptions | undefined): value is StoreClientOptions {
+  return value !== undefined && !('getStatus' in value);
 }
 
 function readStoreItems(payload: unknown): StoreSearchCandidate[] {
@@ -132,6 +237,52 @@ function normalizeAppDetails(appId: number, payload: unknown): StoreAppDetails |
     shortDescription: typeof data.short_description === 'string' ? data.short_description : undefined,
     headerImage: typeof data.header_image === 'string' ? data.header_image : undefined,
     storeUrl: `https://store.steampowered.com/app/${appId}/`
+  };
+}
+
+function readPersistedCacheEntry(payload: unknown, appId: number): CachedAppDetails | undefined {
+  if (!isRecord(payload) || typeof payload.updatedAt !== 'string') {
+    return undefined;
+  }
+
+  const updatedAtMs = Date.parse(payload.updatedAt);
+  if (Number.isNaN(updatedAtMs)) {
+    return undefined;
+  }
+
+  const details = readPersistedAppDetails(payload.details, appId);
+  if (!details) {
+    return undefined;
+  }
+
+  return {
+    details,
+    updatedAtMs
+  };
+}
+
+function readPersistedAppDetails(value: unknown, appId: number): StoreAppDetails | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const persistedAppId = typeof value.appId === 'number' ? value.appId : undefined;
+  const name = typeof value.name === 'string' ? value.name : undefined;
+  if (persistedAppId !== appId || !name) {
+    return undefined;
+  }
+
+  return {
+    appId,
+    name,
+    developers: readStringArray(value.developers),
+    publishers: readStringArray(value.publishers),
+    genres: readStringArray(value.genres),
+    categories: readStringArray(value.categories),
+    tags: readStringArray(value.tags),
+    shortDescription: typeof value.shortDescription === 'string' ? value.shortDescription : undefined,
+    headerImage: typeof value.headerImage === 'string' ? value.headerImage : undefined,
+    storeUrl: typeof value.storeUrl === 'string' ? value.storeUrl : `https://store.steampowered.com/app/${appId}/`
   };
 }
 

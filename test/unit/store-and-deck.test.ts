@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DeckStatusProvider, StoreClient } from '@steam-mcp/steam-core';
@@ -50,12 +51,83 @@ test('store client normalizes sparse appdetails payloads', async () => {
   assert.equal(details.storeUrl, 'https://store.steampowered.com/app/620/');
 });
 
-test('store client does not cache failed or unusable appdetails responses', async () => {
+test('store client persists appdetails cache to disk and reuses it across instances', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const appDetailsPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-620.json'), 'utf8');
+  const cacheDir = await mkdtemp(path.join(tmpdir(), 'steam-mcp-store-cache-persist-'));
   let requestCount = 0;
 
-  const storeClient = new StoreClient(async () => {
+  const firstClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response(appDetailsPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-01T00:00:00.000Z') });
+
+  const first = await firstClient.getAppDetails(620);
+  assert.ok(first);
+  assert.equal(first.name, 'Portal 2');
+  assert.equal(requestCount, 1);
+
+  const secondClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-02T00:00:00.000Z') });
+
+  const second = await secondClient.getAppDetails(620);
+  assert.ok(second);
+  assert.equal(second.name, 'Portal 2');
+  assert.equal(requestCount, 1);
+});
+
+test('store client refreshes stale cached appdetails after ttl and falls back to stale data on refresh failure', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const appDetailsPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-620.json'), 'utf8');
+  const refreshedPayload = JSON.stringify({
+    '620': {
+      success: true,
+      data: {
+        name: 'Portal 2 (Refreshed)',
+        developers: ['Valve'],
+        publishers: ['Valve'],
+        genres: [{ id: '23', description: 'Adventure' }],
+        categories: [{ id: 2, description: 'Single-player' }],
+        tags: ['Co-op']
+      }
+    }
+  });
+  const cacheDir = await mkdtemp(path.join(tmpdir(), 'steam-mcp-store-cache-ttl-'));
+  let requestCount = 0;
+
+  const initialClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response(appDetailsPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-01T00:00:00.000Z') });
+  await initialClient.getAppDetails(620);
+
+  const refreshedClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response(refreshedPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-02-05T00:00:00.000Z') });
+  const refreshed = await refreshedClient.getAppDetails(620);
+  assert.ok(refreshed);
+  assert.equal(refreshed.name, 'Portal 2 (Refreshed)');
+
+  const fallbackClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-03-12T00:00:00.000Z') });
+  const fallback = await fallbackClient.getAppDetails(620);
+  assert.ok(fallback);
+  assert.equal(fallback.name, 'Portal 2 (Refreshed)');
+  assert.equal(requestCount, 3);
+});
+
+test('store client does not persist failed or unusable appdetails responses', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const appDetailsPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-620.json'), 'utf8');
+  const cacheDir = await mkdtemp(path.join(tmpdir(), 'steam-mcp-store-cache-invalid-'));
+  let requestCount = 0;
+
+  const firstClient = new StoreClient(async () => {
     requestCount += 1;
     if (requestCount === 1) {
       return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
@@ -66,16 +138,24 @@ test('store client does not cache failed or unusable appdetails responses', asyn
     }
 
     return new Response(appDetailsPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
-  });
+  }, undefined, { cacheDir, now: () => new Date('2026-01-01T00:00:00.000Z') });
 
-  const first = await storeClient.getAppDetails(620);
-  const second = await storeClient.getAppDetails(620);
-  const third = await storeClient.getAppDetails(620);
+  const first = await firstClient.getAppDetails(620);
+  const second = await firstClient.getAppDetails(620);
+  const third = await firstClient.getAppDetails(620);
+
+  const secondClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-02T00:00:00.000Z') });
+  const fourth = await secondClient.getAppDetails(620);
 
   assert.equal(first, undefined);
   assert.equal(second, undefined);
   assert.ok(third);
   assert.equal(third.name, 'Portal 2');
+  assert.ok(fourth);
+  assert.equal(fourth.name, 'Portal 2');
   assert.equal(requestCount, 3);
 });
 
