@@ -11,6 +11,7 @@ const steamCollectionRuleSchema = z.object({
   addToCollections: z.array(z.string()).optional(),
   removeFromCollections: z.array(z.string()).optional(),
   setCollections: z.array(z.string()).optional(),
+  deleteCollections: z.array(z.string()).optional(),
   hidden: z.boolean().optional()
 });
 
@@ -30,7 +31,7 @@ export function registerSteamCollectionPlanTool(server: McpServer, context: Stea
     'steam_collection_plan',
     {
       title: 'Steam collection plan',
-      description: 'Create a durable preview plan for hidden flags and named collections, with request-scoped read-only or ignored collections, without mutating Steam state.',
+      description: 'Create a durable preview plan for hidden flags, named collection edits, and collection deletes, with request-scoped read-only or ignored collections, without mutating Steam state.',
       inputSchema: steamCollectionPlanArgsSchema
     },
     async (rawArgs: unknown) => {

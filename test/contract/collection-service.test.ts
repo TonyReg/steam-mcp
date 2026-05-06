@@ -24,6 +24,19 @@ import {
 } from '../support/cloudstorage-shape.js';
 import { materializeSteamFixture } from '../support/fixture-steam.js';
 
+function createTombstoneEntry(key: string, version: string | null = '1416'): Record<string, unknown> {
+  return {
+    key,
+    timestamp: 1,
+    is_deleted: true,
+    version
+  };
+}
+
+async function writePairArrayEntries(sourcePath: string, entries: Array<[string, unknown]>): Promise<void> {
+  await writeFile(sourcePath, `${JSON.stringify(entries, null, 2)}\n`, 'utf8');
+}
+
 async function createCollectionServiceHarness(enableWrites = true, envOverrides: NodeJS.ProcessEnv = {}) {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot, enableWrites);
@@ -564,6 +577,236 @@ test('collection service finalizes dirty state', async () => {
   assert.deepEqual(modifiedKeys, []);
   assert.deepEqual(dirtyNamespaces, [[1, '1417'], [3, '0']]);
   assert.deepEqual(namespaces, [[1, '1417'], [3, '0']]);
+});
+
+test('collection service deletes a live normal collection into a tombstone and removes memberships from computed state', async () => {
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const collectionService = harness.createCollectionService();
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        deleteCollections: ['Puzzle']
+      }
+    ]
+  });
+
+  assert.equal(preview.destructive, true);
+  assert.deepEqual(preview.plan.collectionDeletes, ['Puzzle']);
+  assert.match(preview.plan.warnings.join(' '), /destructive changes/i);
+
+  const result = await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true
+  });
+
+  const updated = await readPairArrayDocument(harness.sourcePath);
+  const puzzleWrapper = readPairArrayWrapper(updated, 'user-collections.uc-puzzle');
+  const modifiedKeys = await readModifiedKeys(harness.sourcePath);
+
+  assert.equal(result.appliedOperationCount, 0);
+  assert.equal(puzzleWrapper.is_deleted, true);
+  assert.equal('value' in puzzleWrapper, false);
+  assert.equal(puzzleWrapper.version, null);
+  assert.deepEqual(modifiedKeys, ['user-collections.uc-puzzle']);
+
+  const finalized = await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true,
+    finalize: true
+  });
+  assert.equal(finalized.appliedOperationCount, 0);
+
+  const backend = new CloudStorageJsonCollectionBackend(harness.sourcePath, harness.fixture.steamId);
+  const snapshot = await backend.readSnapshot();
+  assert.deepEqual(snapshot.collectionsByApp, {
+    '440': ['Multiplayer'],
+    '570': ['Multiplayer']
+  });
+  assert.equal(snapshot.rawMetadata.backendKeyMap.puzzle, 'user-collections.uc-puzzle');
+  assert.equal(snapshot.rawMetadata.displayNameMap.puzzle, 'Puzzle');
+});
+
+test('collection service warns and no-ops when deleting an already deleted collection', async () => {
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const entries = await readPairArrayDocument(harness.sourcePath);
+  await writePairArrayEntries(
+    harness.sourcePath,
+    entries.map(([key, value]) => key === 'user-collections.uc-puzzle' ? [key, createTombstoneEntry(key)] : [key, value])
+  );
+  const collectionService = harness.createCollectionService();
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        deleteCollections: ['Puzzle']
+      }
+    ]
+  });
+
+  assert.match(preview.plan.warnings.join(' '), /already deleted/i);
+
+  const beforeDocumentText = await readFile(harness.sourcePath, 'utf8');
+  const beforeNamespacesText = await readFile(harness.namespacePath, 'utf8');
+  const beforeModifiedKeys = await readModifiedKeys(harness.sourcePath);
+  const result = await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true
+  });
+
+  assert.equal(result.appliedOperationCount, 0);
+  assert.equal(await readFile(harness.sourcePath, 'utf8'), beforeDocumentText);
+  assert.equal(await readFile(harness.namespacePath, 'utf8'), beforeNamespacesText);
+  assert.deepEqual(await readModifiedKeys(harness.sourcePath), beforeModifiedKeys);
+});
+
+test('collection service restores a deleted collection by canonical name using the existing tombstone key', async () => {
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const entries = await readPairArrayDocument(harness.sourcePath);
+  await writePairArrayEntries(
+    harness.sourcePath,
+    entries.map(([key, value]) => key === 'user-collections.uc-puzzle' ? [key, createTombstoneEntry(key)] : [key, value])
+  );
+  const collectionService = harness.createCollectionService();
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [620],
+        addToCollections: [' puzzle ']
+      }
+    ]
+  });
+
+  await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true
+  });
+  await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true,
+    finalize: true
+  });
+
+  const updated = await readPairArrayDocument(harness.sourcePath);
+  const puzzle = readPairArrayPayload(updated, 'user-collections.uc-puzzle') as { id: string; name: string; added: number[]; removed: number[] };
+  assert.deepEqual(updated.filter(([key]) => key.includes('puzzle')).map(([key]) => key), ['user-collections.uc-puzzle']);
+  assert.deepEqual(puzzle, {
+    id: 'uc-puzzle',
+    name: 'Puzzle',
+    added: [620],
+    removed: []
+  });
+});
+
+test('collection service ignores collection deletes in add-only mode', async () => {
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const collectionService = harness.createCollectionService();
+
+  const preview = await collectionService.createPlan({
+    mode: 'add-only',
+    rules: [
+      {
+        deleteCollections: ['Puzzle']
+      }
+    ]
+  });
+
+  assert.equal(preview.destructive, false);
+  assert.deepEqual(preview.plan.collectionDeletes, []);
+  assert.match(preview.plan.warnings.join(' '), /Ignoring destructive collection deletes in add-only mode/i);
+});
+
+test('collection service rejects plans that delete and mutate the same canonical collection', async () => {
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const collectionService = harness.createCollectionService();
+
+  await assert.rejects(
+    () => collectionService.createPlan({
+      mode: 'merge',
+      rules: [
+        {
+          deleteCollections: ['Puzzle']
+        },
+        {
+          appIds: [620],
+          addToCollections: ['puzzle']
+        }
+      ]
+    }),
+    /cannot both delete and modify collection puzzle/i
+  );
+});
+
+test('collection service rejects ambiguous duplicate canonical names across live and tombstone entries', async () => {
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const entries = await readPairArrayDocument(harness.sourcePath);
+  await writePairArrayEntries(harness.sourcePath, [
+    ...entries,
+    ['user-collections.uc-Puzzle', createTombstoneEntry('user-collections.uc-Puzzle')]
+  ]);
+
+  const collectionService = harness.createCollectionService();
+  await assert.rejects(
+    () => collectionService.createPlan({
+      mode: 'merge',
+      rules: [
+        {
+          appIds: [620],
+          addToCollections: ['Puzzle']
+        }
+      ]
+    }),
+    /ambiguous collection names/i
+  );
+});
+
+test('collection service uses the live on-disk document to resolve a tombstoned collection backend key during apply', async () => {
+  const harness = await createCollectionServiceHarness();
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const collectionService = harness.createCollectionService();
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [620],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  const entries = await readPairArrayDocument(harness.sourcePath);
+  await writePairArrayEntries(harness.sourcePath, [
+    ...entries,
+    ['user-collections.uc-Racing', createTombstoneEntry('user-collections.uc-Racing')]
+  ]);
+
+  await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true
+  });
+  await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true,
+    finalize: true
+  });
+
+  const updated = await readPairArrayDocument(harness.sourcePath);
+  assert.deepEqual(updated.filter(([key]) => key.toLowerCase().includes('racing')).map(([key]) => key), ['user-collections.uc-Racing']);
+  const racing = readPairArrayPayload(updated, 'user-collections.uc-Racing') as { id: string; name: string; added: number[]; removed: number[] };
+  assert.equal(racing.id, 'uc-Racing');
+  assert.equal(racing.name, 'Racing');
+  assert.deepEqual(racing.added, [620]);
 });
 
 test('collection service stages hidden-only dirty-stage changes', async () => {
