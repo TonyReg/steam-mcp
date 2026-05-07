@@ -253,11 +253,11 @@ test('collection service preserves live-style pair-array documents and ignored-c
   const wrappedCoop = updated.find(([key]) => key === 'user-collections.uc-co-op')?.[1] as Record<string, unknown> | undefined;
   assert.ok(wrappedCoop);
   assert.equal(typeof wrappedCoop.timestamp, 'number');
-  assert.equal(wrappedCoop.version, '1417');
+  assert.equal(wrappedCoop.version, '1418');
 
   const namespaces = JSON.parse(await readFile(harness.namespacePath, 'utf8')) as Array<[number, string]>;
   assert.deepEqual(beforeNamespaces, [[1, '1416'], [3, '0']]);
-  assert.deepEqual(namespaces, [[1, '1417'], [3, '0']]);
+  assert.deepEqual(namespaces, [[1, '1418'], [3, '0']]);
 });
 
 test('collection service bumps wrapped entry metadata and namespace counter only when wrapped payload changes', async () => {
@@ -290,7 +290,7 @@ test('collection service bumps wrapped entry metadata and namespace counter only
   const puzzleWrapper = updated.find(([key]) => key === 'user-collections.uc-puzzle')?.[1] as Record<string, unknown>;
   assert.ok(puzzleWrapper);
   assert.equal(typeof puzzleWrapper.timestamp, 'number');
-  assert.equal(puzzleWrapper.version, '1417');
+  assert.equal(puzzleWrapper.version, '1418');
   assert.ok(Number(puzzleWrapper.timestamp) >= Number(beforePuzzleWrapper.timestamp));
 
   const puzzle = readPairArrayPayload(updated, 'user-collections.uc-puzzle') as { name: string; added: number[]; removed: number[]; description?: string };
@@ -301,7 +301,7 @@ test('collection service bumps wrapped entry metadata and namespace counter only
 
   const namespaces = JSON.parse(await readFile(harness.namespacePath, 'utf8')) as Array<[number, string]>;
   assert.deepEqual(beforeNamespaces, [[1, '1416'], [3, '0']]);
-  assert.deepEqual(namespaces, [[1, '1417'], [3, '0']]);
+  assert.deepEqual(namespaces, [[1, '1418'], [3, '0']]);
 });
 
 test('collection service leaves wrapped metadata and namespace counter unchanged on no-op apply', async () => {
@@ -659,10 +659,10 @@ test('collection service finalizes dirty state', async () => {
   const namespaces = JSON.parse(await readFile(harness.namespacePath, 'utf8')) as Array<[number, string]>;
 
   assert.equal(result.appliedOperationCount, 1);
-  assert.equal(racingWrapper.version, '1417');
+  assert.equal(racingWrapper.version, '1418');
   assert.deepEqual(modifiedKeys, []);
   assert.deepEqual(dirtyNamespaces, [[1, '1417'], [3, '0']]);
-  assert.deepEqual(namespaces, [[1, '1417'], [3, '0']]);
+  assert.deepEqual(namespaces, [[1, '1418'], [3, '0']]);
 });
 
 test('collection service deletes a live normal collection into a tombstone and removes memberships from computed state', async () => {

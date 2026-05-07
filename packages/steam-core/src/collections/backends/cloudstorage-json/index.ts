@@ -166,7 +166,8 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
       throw new Error('Finalize cannot continue because namespace metadata is missing for a dirty staged state.');
     }
 
-    const finalizedNamespaceValue = validateFinalizedNamespaceValue(currentNamespaceValue);
+    const dirtyNamespaceValue = validateFinalizedNamespaceValue(currentNamespaceValue);
+    const finalizedNamespaceValue = bumpNamespaceValue(dirtyNamespaceValue);
 
     const normalizedModifiedKeys = uniqueStrings(modifiedKeys);
     const normalizedDirtyWrappedKeys = uniqueStrings(dirtyWrappedKeys);
