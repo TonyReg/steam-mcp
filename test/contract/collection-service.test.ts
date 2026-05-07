@@ -351,7 +351,7 @@ test('collection service rejects apply when Steam is running and orchestration i
   );
 });
 
-test('collection service orchestration stops Steam, applies staged flow, and restarts only when wrapper stopped it', async () => {
+test('collection service orchestration stops Steam on dirty apply but does NOT restart until finalize', async () => {
   const harness = await createCollectionServiceHarness(true, {
     STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
   });
@@ -369,12 +369,18 @@ test('collection service orchestration stops Steam, applies staged flow, and res
     ]
   });
 
+  // Dirty-only apply: wrapper stops Steam, writes staged state, but does NOT restart.
+  // Restarting here would make staged-only state look sync-complete before finalize runs.
   const dirtyResult = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
   assert.equal(dirtyResult.appliedOperationCount, 1);
-  assert.deepEqual(safetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped', 'startSteamBestEffort']);
+  assert.deepEqual(safetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped']);
 
   safetyService.calls.length = 0;
 
+  // Finalize apply: Steam was left closed by the dirty call above.
+  // isSteamRunning() returns false, so the wrapper does not stop it and stoppedByWrapper=false.
+  // Therefore no restart occurs from the wrapper (user must relaunch Steam manually or
+  // use a second orchestrated call from a state where Steam is running).
   const finalizeResult = await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
     requireSteamClosed: true,
@@ -382,7 +388,7 @@ test('collection service orchestration stops Steam, applies staged flow, and res
   });
 
   assert.equal(finalizeResult.appliedOperationCount, 1);
-  assert.deepEqual(safetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped', 'startSteamBestEffort']);
+  assert.deepEqual(safetyService.calls, []);
 });
 
 test('collection service orchestration does not relaunch Steam when it was already closed', async () => {
@@ -469,11 +475,12 @@ test('collection service orchestration continues after forced shutdown fallback 
   const result = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
 
   assert.equal(result.appliedOperationCount, 1);
+  // Dirty-only apply: forced fallback shutdown succeeded, but restart is skipped because
+  // state is staged-only (not sync-complete) — finalize=true is still required.
   assert.deepEqual(safetyService.calls, [
     'stopSteamBestEffort',
     'stopSteamBestEffort:forcedFallback',
-    'waitForSteamStopped',
-    'startSteamBestEffort'
+    'waitForSteamStopped'
   ]);
 });
 
@@ -617,7 +624,7 @@ test('collection service writes dirty stage first', async () => {
   assert.deepEqual(modifiedKeys, ['user-collections.uc-racing']);
   assert.deepEqual(beforeNamespaces, [[1, '1416'], [3, '0']]);
   assert.deepEqual(namespaces, [[1, '1417'], [3, '0']]);
-  assert.match(result.warnings.join(' '), /finalize=true to finalize/i);
+  assert.match(result.warnings.join(' '), /finalize=true to complete the staged sync/i);
 
   const persistedPlan = JSON.parse(await readFile(preview.plan.planPath, 'utf8')) as { expectedDirtySnapshotHash?: string };
   assert.equal(typeof persistedPlan.expectedDirtySnapshotHash, 'string');

@@ -173,11 +173,22 @@ export class CollectionService {
       stoppedByWrapper = true;
     }
 
+    // Track whether the inner apply succeeded so we can decide whether to restart.
+    // For a dirty-only (non-finalize) apply, do NOT restart Steam on success: the state
+    // is staged-only and restarting would make it look sync-complete before finalize runs.
+    // Restart is still performed when finalize=true succeeds, or when the inner apply throws
+    // after the wrapper already stopped Steam.
+    let applySucceeded = false;
     try {
-      return await this.applyPlanInner(normalizedPlanId, config, writableDiscovery, options);
+      const result = await this.applyPlanInner(normalizedPlanId, config, writableDiscovery, options);
+      applySucceeded = true;
+      return result;
     } finally {
       if (stoppedByWrapper) {
-        await this.safelyRestartSteamAfterApply();
+        const shouldRestart = options.finalize === true || !applySucceeded;
+        if (shouldRestart) {
+          await this.safelyRestartSteamAfterApply();
+        }
       }
     }
   }

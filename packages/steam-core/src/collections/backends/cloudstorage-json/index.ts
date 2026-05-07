@@ -143,7 +143,7 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
         finalizeWrites,
         expectedDirtySnapshotHash: nextSnapshot.snapshotHash,
         expectedFinalSnapshotHash: nextSnapshot.snapshotHash,
-        finalizeWarnings: modifiedKeys.length === 0 ? undefined : ['Dirty stage applied; call steam_collection_apply with finalize=true to finalize.']
+        finalizeWarnings: modifiedKeys.length === 0 ? undefined : ['Dirty stage applied (staged-only; Steam cloud sync is NOT complete). Call steam_collection_apply with finalize=true to complete the staged sync.']
       };
     }
 
