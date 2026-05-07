@@ -71,7 +71,7 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.match(JSON.stringify(collectionPlannerPrompt), /steam_collection_plan/);
     assert.match(JSON.stringify(collectionPlannerPrompt), /Group co-op hidden backlog/);
     assert.match(JSON.stringify(collectionPlannerPrompt), /STEAM_ENABLE_WINDOWS_ORCHESTRATION=1/);
-    assert.match(JSON.stringify(collectionPlannerPrompt), /does not mean Steam sync has completed/);
+    assert.match(JSON.stringify(collectionPlannerPrompt), /does not mean Steam cloud sync has completed/);
 
     const status = await client.callTool({ name: 'steam_status', arguments: {} });
     assert.match(JSON.stringify(status), /cloudstorage-json/);

@@ -84,8 +84,8 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               '2. Use steam_library_search or steam_library_list to inspect the candidate games that match the request.',
               '3. Call steam_collection_plan to create a durable preview artifact. Review matchedGames, warnings, destructive status, and the durable plan identifier before proposing any apply step.',
               '4. Do not call steam_collection_apply unless the user explicitly asks to mutate Steam-owned state and the write gate (`STEAM_ENABLE_COLLECTION_WRITES=1`) is enabled.',
-              '5. Remind the user that `STEAM_ENABLE_COLLECTION_WRITES=1` remains the write-unlock / operator kill switch. `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` is only an optional Windows wrapper that can close Steam before each staged apply call and best-effort relaunch it afterward.',
-              '6. Remind the user that apply remains backup-first, drift-checked, atomic, rollback-capable, rejects `requireSteamClosed=false`, still uses the dirty-stage then finalize flow, and that any restart is best-effort only and does not mean Steam sync has completed.'
+              '5. Remind the user that `STEAM_ENABLE_COLLECTION_WRITES=1` remains the write-unlock / operator kill switch. `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` is only an optional Windows wrapper that closes Steam before each apply call but does NOT relaunch after a dirty-only apply (staged-only; not sync-complete); it relaunches only after a finalize apply or after a failed apply if the wrapper stopped it.',
+              '6. Remind the user that apply is backup-first, drift-checked, atomic, rollback-capable, rejects `requireSteamClosed=false`, uses a dirty-stage then `finalize=true` flow, plain apply is dirty-only (staged; sync NOT complete), and any restart after finalize is best-effort only and does not mean Steam cloud sync has completed.'
             ].join('\n')
           }
         }]

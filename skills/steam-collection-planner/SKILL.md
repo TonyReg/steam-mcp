@@ -21,7 +21,7 @@ Use this skill for plan-first Steam collection workflows built on top of the Ste
 4. Call `steam_collection_plan` to create a durable preview artifact.
 5. Review `matchedGames`, warnings, destructive status, and the plan identifier with the user.
 6. Only call `steam_collection_apply` after explicit user confirmation and only when Steam-owned writes are enabled via `STEAM_ENABLE_COLLECTION_WRITES=1`.
-7. Treat `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` as a separate Windows-only opt-in wrapper, not as a write-unlock; it can best-effort close Steam before each staged apply call and relaunch it afterward only if the wrapper stopped it.
+7. Treat `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` as a separate Windows-only opt-in wrapper, not as a write-unlock; it closes Steam before each apply call but does NOT restart after a successful dirty-only apply (state is staged-only; sync is NOT complete until `finalize=true` succeeds); it restarts only after a finalize apply or after a failed apply if the wrapper stopped it.
 
 ## Safety Rules
 
@@ -30,7 +30,7 @@ Use this skill for plan-first Steam collection workflows built on top of the Ste
 - Never call `steam_collection_apply` unless the user explicitly asks for the mutation.
 - Remind the user that `STEAM_ENABLE_COLLECTION_WRITES=1` is the explicit write-unlock / operator kill switch.
 - Remind the user that `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` is only an optional Windows wrapper around the existing staged flow; it does not add a new tool argument or relax `requireSteamClosed=false`.
-- Remind the user that apply itself is backup-first, drift-checked, atomic, rollback-capable, requires Steam to be closed, uses a dirty-stage then finalize flow for cloudstorage changes, and any restart is best-effort only and does not imply Steam sync completion.
+- Remind the user that apply itself is backup-first, drift-checked, atomic, rollback-capable, requires Steam to be closed, uses a dirty-stage then `finalize=true` flow for cloudstorage changes; plain apply is dirty-only (staged; sync NOT complete), `finalize=true` is required to complete sync, orchestration may leave Steam closed after a dirty-only apply, and any restart after finalize is best-effort only and does not imply Steam cloud sync has completed.
 
 ## Tool Order Reference
 
