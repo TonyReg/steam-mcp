@@ -12,23 +12,23 @@
 - Export results as JSON or Markdown with `steam_export`
 - Generate `steam://` and web links with `steam_link_generate`
 - Preview collection and hidden-state changes with `steam_collection_plan`
-- Apply a reviewed collection plan with `steam_collection_apply` when writes are explicitly enabled, using the permanent staged cloudstorage apply flow
+- Apply a reviewed collection plan with `steam_collection_apply` when writes are explicitly enabled, using a staged cloudstorage apply flow
 
 ## Safety model
 
 - Read-heavy by default
 - `steam_collection_apply` is the only tool that mutates Steam-owned state
 - Steam-owned writes stay disabled unless `STEAM_ENABLE_COLLECTION_WRITES=1`; treat this as the explicit write-unlock / operator kill switch for Steam-owned mutations
-- `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` is a separate Windows-only opt-in wrapper that can best-effort launch Steam on MCP startup and close/relaunch Steam around each staged apply call without changing the write gate
+- `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` is a separate Windows-only opt-in wrapper that can best-effort launch Steam on MCP startup and close Steam before each apply call; after a successful dirty-only apply it leaves Steam closed, and after a finalize apply or a failed apply it best-effort relaunches Steam only if the wrapper stopped it
 - `steam_collection_plan` creates durable preview plans under MCP-owned state without mutating Steam-owned data
-- Apply is backup-first, drift-checked, rollback-capable, and still requires Steam to be closed; orchestration only satisfies that precondition on supported Windows runtimes
+- Apply is backup-first, drift-checked, rollback-capable, and requires Steam to be closed; orchestration satisfies that precondition on supported Windows runtimes
 - Staged sync is JSON-only for cloudstorage files: `cloud-storage-namespace-1.json`, `cloud-storage-namespace-1.modified.json`, and `cloud-storage-namespaces.json`
 - Staged sync requires pair-array cloudstorage format, rejects object-shaped cloudstorage documents for apply, and does not fall back to a legacy one-shot path
 - Dirty-stage and finalize calls each create backups for the files touched in that invocation
 
 ## Quick start
 
-To use `steam-mcp`, you need an MCP client that can launch a local `stdio` server. The current setup path is: build this repo, then point your client at the built server entrypoint.
+To use `steam-mcp`, you need an MCP client that can launch a local `stdio` server. Build this repo, then point your client at the built server entrypoint.
 
 ### Requirements
 
@@ -82,7 +82,7 @@ If your MCP client supports prompts, `steam-mcp` includes built-in workflows for
 ### Safety and default collection behavior
 
 - `STEAM_ENABLE_COLLECTION_WRITES` — enable `steam_collection_apply` when set to `1`
-- `STEAM_ENABLE_WINDOWS_ORCHESTRATION` — when set to `1` on Windows, best-effort launch Steam during MCP startup, close Steam before each staged apply call, ensure it is stopped, then best-effort relaunch it only if the wrapper stopped it
+- `STEAM_ENABLE_WINDOWS_ORCHESTRATION` — when set to `1` on Windows, best-effort launch Steam during MCP startup, close Steam before each apply call, ensure it is stopped, leave Steam closed after a successful dirty-only apply, and best-effort relaunch it only after a finalize apply or a failed apply if the wrapper stopped it
 - `STEAM_DEFAULT_READ_ONLY_COLLECTIONS` — JSON array of collection names to preserve during planning and apply
 - `STEAM_DEFAULT_IGNORE_COLLECTIONS` — JSON array of collection names excluded from similarity, search, and list filtering when the tool opts in
 
@@ -103,7 +103,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 | `steam_store_search` | Search the public Steam store without authenticated session reuse |
 | `steam_find_similar` | Rank similar library or store candidates deterministically |
 | `steam_collection_plan` | Create a durable preview plan for collection or hidden-state changes |
-| `steam_collection_apply` | Apply a previously generated plan when writes are enabled; plain apply performs the dirty stage, `finalize=true` completes finalize, and optional Windows orchestration can close/relaunch Steam around each staged call without adding new tool arguments |
+| `steam_collection_apply` | Apply a generated plan when writes are enabled; plain apply performs the dirty stage, `finalize=true` completes finalize, and optional Windows orchestration can close Steam around apply calls, leave Steam closed after a dirty-only apply, and best-effort relaunch after finalize or a failed apply when the wrapper stopped Steam |
 | `steam_export` | Render library or plan data as JSON or Markdown |
 | `steam_link_generate` | Generate store, community, library, and launch links |
 
@@ -114,9 +114,9 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 - Steam store and Steam Deck data are used as read-only enrichment sources
 - Collection changes should follow the plan-first flow: preview with `steam_collection_plan`, then apply only after explicit confirmation and with writes enabled
 - Collection sync is explicitly limited to cloudstorage JSON files; it does not modify `localconfig.vdf`, LevelDB, `sharedconfig.vdf`, or undocumented Steam APIs
-- `steam_collection_apply` semantics are staged-only: omit `finalize` for the default dirty stage, then call again with `finalize=true` for stage-2 finalize; no legacy one-shot apply path remains
-- Manual workflow remains valid: users can still close Steam themselves and run the existing staged flow without orchestration
-- When `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` is enabled on Windows, steam-mcp may best-effort start Steam during MCP startup, and each dirty/finalize apply call may independently close and best-effort relaunch Steam if the wrapper stopped it
+- `steam_collection_apply` uses a staged flow: omit `finalize` for the default dirty stage, then call again with `finalize=true` to complete finalize
+- You can close Steam yourself and run the staged flow without orchestration
+- When `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` is enabled on Windows, steam-mcp may best-effort start Steam during MCP startup; for a dirty-only apply the wrapper closes Steam if needed and leaves it closed, and after a finalize apply or a failed apply it best-effort relaunches Steam only if the wrapper stopped it
 - Restart is best-effort only and does not imply Steam cloud sync has completed
 - Staged apply requires Steam to stay closed; `requireSteamClosed=false` is rejected
 
