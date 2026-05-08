@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -75,6 +75,85 @@ test('store client persists appdetails cache to disk and reuses it across instan
   const second = await secondClient.getAppDetails(620);
   assert.ok(second);
   assert.equal(second.name, 'Portal 2');
+  assert.equal(requestCount, 1);
+});
+
+test('store client returns sparse appdetails live without persisting them', async () => {
+  const cacheDir = await mkdtemp(path.join(tmpdir(), 'steam-mcp-store-cache-sparse-live-'));
+  let requestCount = 0;
+  const sparsePayload = JSON.stringify({
+    '620': {
+      success: true,
+      data: {
+        steam_appid: 620,
+        name: 'Portal 2'
+      }
+    }
+  });
+
+  const firstClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response(sparsePayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-01T00:00:00.000Z') });
+
+  const first = await firstClient.getAppDetails(620);
+  const second = await firstClient.getAppDetails(620);
+
+  assert.ok(first);
+  assert.equal(first.name, 'Portal 2');
+  assert.ok(second);
+  assert.equal(second.name, 'Portal 2');
+  assert.equal(requestCount, 2);
+
+  const secondClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-02T00:00:00.000Z') });
+
+  const third = await secondClient.getAppDetails(620);
+  assert.equal(third, undefined);
+  assert.equal(requestCount, 3);
+});
+
+ test('store client ignores sparse persisted cache entries and refreshes them from richer metadata', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const appDetailsPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-620.json'), 'utf8');
+  const cacheDir = await mkdtemp(path.join(tmpdir(), 'steam-mcp-store-cache-sparse-persisted-'));
+  await writeFile(path.join(cacheDir, '620.json'), `${JSON.stringify({
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    details: {
+      appId: 620,
+      name: 'Portal 2',
+      developers: [],
+      publishers: [],
+      genres: [],
+      categories: [],
+      tags: [],
+      storeUrl: 'https://store.steampowered.com/app/620/'
+    }
+  }, null, 2)}\n`, 'utf8');
+
+  let requestCount = 0;
+  const storeClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response(appDetailsPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-02T00:00:00.000Z') });
+
+  const details = await storeClient.getAppDetails(620);
+  assert.ok(details);
+  assert.equal(details.name, 'Portal 2');
+  assert.deepEqual(details.genres, ['Adventure', 'Puzzle']);
+  assert.equal(requestCount, 1);
+
+  const reloadedClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-03T00:00:00.000Z') });
+
+  const cached = await reloadedClient.getAppDetails(620);
+  assert.ok(cached);
+  assert.equal(cached.name, 'Portal 2');
+  assert.deepEqual(cached.genres, ['Adventure', 'Puzzle']);
   assert.equal(requestCount, 1);
 });
 

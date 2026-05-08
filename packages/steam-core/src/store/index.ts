@@ -85,8 +85,11 @@ export class StoreClient {
 
     const refreshed = await this.fetchAppDetails(appId);
     if (refreshed) {
-      this.detailCache.set(appId, refreshed);
-      await this.persistCacheEntry(appId, refreshed);
+      if (isCacheableAppDetails(refreshed.details)) {
+        this.detailCache.set(appId, refreshed);
+        await this.persistCacheEntry(appId, refreshed);
+      }
+
       return refreshed.details;
     }
 
@@ -272,7 +275,7 @@ function readPersistedAppDetails(value: unknown, appId: number): StoreAppDetails
     return undefined;
   }
 
-  return {
+  const details: StoreAppDetails = {
     appId,
     name,
     developers: readStringArray(value.developers),
@@ -284,6 +287,30 @@ function readPersistedAppDetails(value: unknown, appId: number): StoreAppDetails
     headerImage: typeof value.headerImage === 'string' ? value.headerImage : undefined,
     storeUrl: typeof value.storeUrl === 'string' ? value.storeUrl : `https://store.steampowered.com/app/${appId}/`
   };
+
+  return isCacheableAppDetails(details) ? details : undefined;
+}
+
+function isCacheableAppDetails(details: StoreAppDetails): boolean {
+  if (!details.name.trim()) {
+    return false;
+  }
+
+  return hasNonBlankEntries(details.developers)
+    || hasNonBlankEntries(details.publishers)
+    || hasNonBlankEntries(details.genres)
+    || hasNonBlankEntries(details.categories)
+    || hasNonBlankEntries(details.tags)
+    || hasNonBlankValue(details.shortDescription)
+    || hasNonBlankValue(details.headerImage);
+}
+
+function hasNonBlankEntries(values: string[]): boolean {
+  return values.some((value) => value.trim().length > 0);
+}
+
+function hasNonBlankValue(value: string | undefined): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function readStringArray(value: unknown): string[] {
