@@ -21,6 +21,10 @@ import type { SteamDiscoveryService } from '../discovery/index.js';
 import type { SafetyService } from '../safety/index.js';
 import type { CollectionBackendRegistry } from './backend-registry/index.js';
 
+interface CollectionApplyExecutionResult extends CollectionApplyResult {
+  restartSteamAfterFinalize: boolean;
+}
+
 export class CollectionService {
   constructor(
     private readonly configService: ConfigService,
@@ -173,23 +177,25 @@ export class CollectionService {
       stoppedByWrapper = true;
     }
 
-    // Track whether the inner apply succeeded so we can decide whether to restart.
-    // For a dirty-only (non-finalize) apply, do NOT restart Steam on success: the state
-    // is staged-only and restarting would make it look sync-complete before finalize runs.
-    // Restart is still performed when finalize=true succeeds, or when the inner apply throws
-    // after the wrapper already stopped Steam.
-    let applySucceeded = false;
     try {
-      const result = await this.applyPlanInner(normalizedPlanId, config, writableDiscovery, options);
-      applySucceeded = true;
-      return result;
-    } finally {
-      if (stoppedByWrapper) {
-        const shouldRestart = options.finalize === true || !applySucceeded;
-        if (shouldRestart) {
-          await this.safelyRestartSteamAfterApply();
-        }
+      const result = await this.applyPlanInner(normalizedPlanId, config, writableDiscovery, options, { stoppedByWrapper });
+      const deferredRestartRequested = result.restartSteamAfterFinalize === true;
+      const shouldRestart = options.finalize === true && (deferredRestartRequested || stoppedByWrapper);
+
+      if (!shouldRestart) {
+        return result;
       }
+
+      const restartWarning = await this.safelyRestartSteamAfterApply();
+      return restartWarning
+        ? { ...result, warnings: [...result.warnings, restartWarning] }
+        : result;
+    } catch (error) {
+      if (stoppedByWrapper) {
+        await this.safelyRestartSteamAfterApply();
+      }
+
+      throw error;
     }
   }
 
@@ -208,8 +214,9 @@ export class CollectionService {
       collectionBackendId: string;
       collectionSourcePath: string;
     },
-    options: CollectionApplyOptions
-  ): Promise<CollectionApplyResult> {
+    options: CollectionApplyOptions,
+    orchestrationState: { stoppedByWrapper: boolean } = { stoppedByWrapper: false }
+  ): Promise<CollectionApplyExecutionResult> {
     const backend = this.backendRegistry.resolve(
       discovery.collectionBackendId,
       discovery.collectionSourcePath,
@@ -239,7 +246,8 @@ export class CollectionService {
         backendId: backend.backendId,
         appliedOperationCount,
         warnings: plan.warnings,
-        skipped: []
+        skipped: [],
+        restartSteamAfterFinalize: false
       };
     }
 
@@ -259,13 +267,27 @@ export class CollectionService {
       }
     }
 
-    const planWrite = options.finalize !== true && stageWrites.length > 0 && draft.expectedDirtySnapshotHash
+    const restartSteamAfterFinalize = options.finalize === true
+      ? false
+      : plan.restartSteamAfterFinalize === true || orchestrationState.stoppedByWrapper;
+
+    const persistedPlanForWrite: CollectionPlan = {
+      ...plan,
+      expectedDirtySnapshotHash: options.finalize === true
+        ? undefined
+        : (stageWrites.length > 0 && draft.expectedDirtySnapshotHash ? draft.expectedDirtySnapshotHash : plan.expectedDirtySnapshotHash),
+      restartSteamAfterFinalize
+    };
+
+    const shouldPersistPlan = options.finalize === true
+      ? plan.restartSteamAfterFinalize === true
+      : restartSteamAfterFinalize !== (plan.restartSteamAfterFinalize === true)
+        || (stageWrites.length > 0 && draft.expectedDirtySnapshotHash !== undefined);
+
+    const planWrite = shouldPersistPlan
       ? {
           targetPath: planPath,
-          content: `${JSON.stringify({
-            ...plan,
-            expectedDirtySnapshotHash: draft.expectedDirtySnapshotHash
-          } satisfies CollectionPlan, null, 2)}\n`
+          content: `${JSON.stringify(persistedPlanForWrite, null, 2)}\n`
         }
       : undefined;
 
@@ -276,7 +298,8 @@ export class CollectionService {
         backendId: backend.backendId,
         appliedOperationCount,
         warnings: options.finalize === true ? plan.warnings : [...plan.warnings, ...(hasPendingFinalizeWarning ? draft.finalizeWarnings ?? [] : [])],
-        skipped: []
+        skipped: [],
+        restartSteamAfterFinalize: options.finalize === true ? plan.restartSteamAfterFinalize === true : false
       };
     }
 
@@ -327,7 +350,8 @@ export class CollectionService {
         backupPath: rollbackPath ? backupsByTargetPath[rollbackPath] ?? undefined : undefined,
         rollbackPath,
         warnings: [...plan.warnings, ...(hasPendingFinalizeWarning ? draft.finalizeWarnings ?? [] : [])],
-        skipped: []
+        skipped: [],
+        restartSteamAfterFinalize: options.finalize === true ? plan.restartSteamAfterFinalize === true : false
       };
     } catch (error) {
       const originalError = error instanceof Error ? error : new Error(String(error));
@@ -349,11 +373,14 @@ export class CollectionService {
     }
   }
 
-  private async safelyRestartSteamAfterApply(): Promise<void> {
+  private async safelyRestartSteamAfterApply(): Promise<string | null> {
     try {
-      await this.safetyService.startSteamBestEffort();
+      const restartSucceeded = await this.safetyService.startSteamBestEffort();
+      return restartSucceeded
+        ? null
+        : 'Windows orchestration could not confirm Steam relaunch after finalize; relaunch Steam manually.';
     } catch {
-      // Best-effort only.
+      return 'Windows orchestration could not launch Steam after finalize; relaunch Steam manually.';
     }
   }
 
@@ -395,7 +422,8 @@ function normalizePersistedPlan(plan: CollectionPlan): CollectionPlan {
   return {
     ...plan,
     collectionDeletes: uniqueCollectionNames(plan.collectionDeletes ?? []),
-    policies: normalizePolicies(plan.policies ?? { readOnlyCollections: [], ignoreCollections: [] })
+    policies: normalizePolicies(plan.policies ?? { readOnlyCollections: [], ignoreCollections: [] }),
+    restartSteamAfterFinalize: plan.restartSteamAfterFinalize === true
   };
 }
 

@@ -57,6 +57,7 @@ export interface CollectionPlan {
   sourceRequest?: string;
   planPath: string;
   expectedDirtySnapshotHash?: string;
+  restartSteamAfterFinalize?: boolean;
 }
 
 export interface CollectionSnapshot {

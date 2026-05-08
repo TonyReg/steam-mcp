@@ -88,6 +88,8 @@ class TrackingSafetyService extends SafetyService {
       forceFallback?: boolean;
       stayRunningAfterStop?: boolean;
       shutdownDiagnostics?: string | null;
+      startReturnValue?: boolean;
+      throwOnStart?: boolean;
     } = {}
   ) {
     super(async () => this.running);
@@ -119,8 +121,11 @@ class TrackingSafetyService extends SafetyService {
 
   override async startSteamBestEffort(): Promise<boolean> {
     this.calls.push('startSteamBestEffort');
+    if (this.options.throwOnStart) {
+      throw new Error('steam launch failed');
+    }
     this.running = true;
-    return true;
+    return this.options.startReturnValue ?? true;
   }
 
   override describeLastSteamShutdownAttempt(): string | null {
@@ -351,7 +356,7 @@ test('collection service rejects apply when Steam is running and orchestration i
   );
 });
 
-test('collection service orchestration stops Steam on dirty apply but does NOT restart until finalize', async () => {
+test('collection service orchestration stops Steam on dirty apply and restarts it after finalize', async () => {
   const harness = await createCollectionServiceHarness(true, {
     STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
   });
@@ -369,18 +374,12 @@ test('collection service orchestration stops Steam on dirty apply but does NOT r
     ]
   });
 
-  // Dirty-only apply: wrapper stops Steam, writes staged state, but does NOT restart.
-  // Restarting here would make staged-only state look sync-complete before finalize runs.
   const dirtyResult = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
   assert.equal(dirtyResult.appliedOperationCount, 1);
   assert.deepEqual(safetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped']);
 
   safetyService.calls.length = 0;
 
-  // Finalize apply: Steam was left closed by the dirty call above.
-  // isSteamRunning() returns false, so the wrapper does not stop it and stoppedByWrapper=false.
-  // Therefore no restart occurs from the wrapper (user must relaunch Steam manually or
-  // use a second orchestrated call from a state where Steam is running).
   const finalizeResult = await collectionService.applyPlan(preview.plan.planId, {
     dryRun: false,
     requireSteamClosed: true,
@@ -388,7 +387,121 @@ test('collection service orchestration stops Steam on dirty apply but does NOT r
   });
 
   assert.equal(finalizeResult.appliedOperationCount, 1);
-  assert.deepEqual(safetyService.calls, []);
+  assert.deepEqual(finalizeResult.warnings, []);
+  assert.deepEqual(safetyService.calls, ['startSteamBestEffort']);
+});
+
+
+test('collection service orchestration stops Steam and restarts it within the same finalize call', async () => {
+  const harness = await createCollectionServiceHarness(true, {
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  });
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+
+  const dirtySafetyService = new TrackingSafetyService(false);
+  const dirtyCollectionService = harness.createCollectionService(dirtySafetyService);
+
+  const preview = await dirtyCollectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  const dirtyResult = await dirtyCollectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  assert.equal(dirtyResult.appliedOperationCount, 1);
+  assert.deepEqual(dirtySafetyService.calls, []);
+
+  const finalizeSafetyService = new TrackingSafetyService(true);
+  const finalizeCollectionService = harness.createCollectionService(finalizeSafetyService);
+
+  const finalizeResult = await finalizeCollectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true,
+    finalize: true
+  });
+
+  assert.equal(finalizeResult.appliedOperationCount, 1);
+  assert.deepEqual(finalizeResult.warnings, []);
+  assert.deepEqual(finalizeSafetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped', 'startSteamBestEffort']);
+});
+
+test('collection service finalize warns when deferred Steam restart cannot be confirmed', async () => {
+  const harness = await createCollectionServiceHarness(true, {
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  });
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const safetyService = new TrackingSafetyService(true, {
+    startReturnValue: false
+  });
+  const collectionService = harness.createCollectionService(safetyService);
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  const dirtyResult = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  assert.equal(dirtyResult.appliedOperationCount, 1);
+  assert.deepEqual(safetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped']);
+
+  safetyService.calls.length = 0;
+
+  const finalizeResult = await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true,
+    finalize: true
+  });
+
+  assert.equal(finalizeResult.appliedOperationCount, 1);
+  assert.match(finalizeResult.warnings.join(' '), /could not confirm Steam relaunch after finalize/i);
+  assert.deepEqual(safetyService.calls, ['startSteamBestEffort']);
+});
+
+
+test('collection service finalize warns when deferred Steam restart throws', async () => {
+  const harness = await createCollectionServiceHarness(true, {
+    STEAM_ENABLE_WINDOWS_ORCHESTRATION: '1'
+  });
+  await rewriteCloudstorageAsPairArray(harness.sourcePath);
+  const safetyService = new TrackingSafetyService(true, {
+    throwOnStart: true
+  });
+  const collectionService = harness.createCollectionService(safetyService);
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [440],
+        addToCollections: ['Racing']
+      }
+    ]
+  });
+
+  const dirtyResult = await collectionService.applyPlan(preview.plan.planId, { dryRun: false, requireSteamClosed: true });
+  assert.equal(dirtyResult.appliedOperationCount, 1);
+  assert.deepEqual(safetyService.calls, ['stopSteamBestEffort', 'waitForSteamStopped']);
+
+  safetyService.calls.length = 0;
+
+  const finalizeResult = await collectionService.applyPlan(preview.plan.planId, {
+    dryRun: false,
+    requireSteamClosed: true,
+    finalize: true
+  });
+
+  assert.equal(finalizeResult.appliedOperationCount, 1);
+  assert.match(finalizeResult.warnings.join(' '), /could not launch Steam after finalize/i);
+  assert.deepEqual(safetyService.calls, ['startSteamBestEffort']);
 });
 
 test('collection service orchestration does not relaunch Steam when it was already closed', async () => {
