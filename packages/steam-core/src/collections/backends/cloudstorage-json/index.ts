@@ -130,7 +130,7 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
             },
             {
               targetPath: modifiedPath,
-              content: serializeModifiedKeysDocument([])
+              content: serializeModifiedKeysDocument(modifiedKeys)
             },
             {
               targetPath: namespacePath,
@@ -166,8 +166,7 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
       throw new Error('Finalize cannot continue because namespace metadata is missing for a dirty staged state.');
     }
 
-    const dirtyNamespaceValue = validateFinalizedNamespaceValue(currentNamespaceValue);
-    const finalizedNamespaceValue = bumpNamespaceValue(dirtyNamespaceValue);
+    const finalizedNamespaceValue = validateFinalizedNamespaceValue(currentNamespaceValue);
 
     const normalizedModifiedKeys = uniqueStrings(modifiedKeys);
     const normalizedDirtyWrappedKeys = uniqueStrings(dirtyWrappedKeys);
@@ -195,7 +194,7 @@ export class CloudStorageJsonCollectionBackend implements CollectionBackendAdapt
         },
         {
           targetPath: modifiedPath,
-          content: serializeModifiedKeysDocument([])
+          content: serializeModifiedKeysDocument(modifiedKeys)
         },
         ...(namespaceChanged
           ? [{
