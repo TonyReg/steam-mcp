@@ -2,6 +2,9 @@ import type {
   OfficialOwnedGameSummary,
   OfficialOwnedGamesOptions,
   OfficialOwnedGamesResult,
+  OfficialRecentlyPlayedGameSummary,
+  OfficialRecentlyPlayedGamesOptions,
+  OfficialRecentlyPlayedGamesResult,
   OfficialStoreAppListOptions,
   OfficialStoreAppListResult,
   OfficialStoreAppSummary
@@ -65,6 +68,18 @@ export class OfficialStoreClient {
       'Official owned-games request failed'
     );
     return normalizeOfficialOwnedGames(response);
+  }
+
+  async getRecentlyPlayedGames(request: OfficialRecentlyPlayedGamesOptions): Promise<OfficialRecentlyPlayedGamesResult> {
+    const response = await this.fetchServiceInterfaceJson(
+      'https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v1/',
+      {
+        steamid: request.steamId
+      },
+      'Steam Web API key is required for official recently-played access. Set STEAM_API_KEY.',
+      'Official recently-played request failed'
+    );
+    return normalizeOfficialRecentlyPlayedGames(response);
   }
 
   private async fetchServiceInterfaceJson(
@@ -131,6 +146,22 @@ function normalizeOfficialOwnedGames(payload: unknown): OfficialOwnedGamesResult
   };
 }
 
+function normalizeOfficialRecentlyPlayedGames(payload: unknown): OfficialRecentlyPlayedGamesResult {
+  if (!isRecord(payload) || !isRecord(payload.response)) {
+    return { totalCount: 0, games: [] };
+  }
+
+  const response = payload.response;
+  const games = Array.isArray(response.games)
+    ? response.games.flatMap((entry) => normalizeOfficialRecentlyPlayedGame(entry))
+    : [];
+
+  return {
+    totalCount: toNumber(response.total_count) ?? games.length,
+    games
+  };
+}
+
 function normalizeOfficialStoreApp(payload: unknown): OfficialStoreAppSummary[] {
   if (!isRecord(payload)) {
     return [];
@@ -170,4 +201,26 @@ function normalizeOfficialOwnedGame(payload: unknown): OfficialOwnedGameSummary[
     iconUrl,
     hasCommunityVisibleStats: payload.has_community_visible_stats === true ? true : undefined
   } satisfies OfficialOwnedGameSummary];
+}
+
+function normalizeOfficialRecentlyPlayedGame(payload: unknown): OfficialRecentlyPlayedGameSummary[] {
+  if (!isRecord(payload)) {
+    return [];
+  }
+
+  const appId = toNumber(payload.appid);
+  if (!appId) {
+    return [];
+  }
+
+  const name = typeof payload.name === 'string' && payload.name.trim() !== '' ? payload.name : undefined;
+  const iconUrl = typeof payload.img_icon_url === 'string' && payload.img_icon_url.trim() !== '' ? payload.img_icon_url : undefined;
+
+  return [{
+    appId,
+    name,
+    playtimeTwoWeeks: toNumber(payload.playtime_2weeks),
+    playtimeForever: toNumber(payload.playtime_forever),
+    iconUrl
+  } satisfies OfficialRecentlyPlayedGameSummary];
 }

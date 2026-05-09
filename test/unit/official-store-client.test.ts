@@ -203,3 +203,90 @@ test('official store client surfaces non-ok HTTP failures for owned-games reques
     includeFreeSub: true
   }), /Official owned-games request failed with status 502\./);
 });
+
+test('official store client calls GetRecentlyPlayedGames with input_json-only steamid and normalizes results', async () => {
+  const requestedUrls: string[] = [];
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      requestedUrls.push(url.toString());
+      return new Response(JSON.stringify({
+        response: {
+          total_count: 2,
+          games: [
+            {
+              appid: 620,
+              name: 'Portal 2',
+              playtime_2weeks: 45,
+              playtime_forever: 240,
+              img_icon_url: 'icon-620'
+            },
+            {
+              appid: 440,
+              name: 'Team Fortress 2'
+            }
+          ]
+        }
+      }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }
+  });
+
+  const result = await client.getRecentlyPlayedGames({
+    steamId: '76561198000000000'
+  });
+
+  assert.deepEqual(result, {
+    totalCount: 2,
+    games: [
+      {
+        appId: 620,
+        name: 'Portal 2',
+        playtimeTwoWeeks: 45,
+        playtimeForever: 240,
+        iconUrl: 'icon-620'
+      },
+      {
+        appId: 440,
+        name: 'Team Fortress 2',
+        playtimeTwoWeeks: undefined,
+        playtimeForever: undefined,
+        iconUrl: undefined
+      }
+    ]
+  });
+
+  const requestUrl = new URL(requestedUrls[0] ?? '');
+  assert.equal(requestUrl.toString().startsWith('https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v1/'), true);
+  assert.equal(requestUrl.searchParams.get('key'), 'test-key');
+  assert.equal(requestUrl.searchParams.get('format'), 'json');
+  assert.equal(requestUrl.searchParams.get('steamid'), null);
+
+  const inputJson = JSON.parse(requestUrl.searchParams.get('input_json') ?? '{}') as Record<string, unknown>;
+  assert.deepEqual(inputJson, {
+    steamid: '76561198000000000'
+  });
+});
+
+test('official store client rejects recently-played calls when no API key is configured', async () => {
+  const client = new OfficialStoreClient({
+    fetchImpl: async () => {
+      throw new Error('fetch should not run');
+    }
+  });
+
+  await assert.rejects(() => client.getRecentlyPlayedGames({
+    steamId: '76561198000000000'
+  }), /STEAM_API_KEY/);
+});
+
+test('official store client surfaces non-ok HTTP failures for recently-played requests', async () => {
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async () => new Response('upstream failure', { status: 504 })
+  });
+
+  await assert.rejects(() => client.getRecentlyPlayedGames({
+    steamId: '76561198000000000'
+  }), /Official recently-played request failed with status 504\./);
+});

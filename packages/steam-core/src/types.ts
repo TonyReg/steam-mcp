@@ -310,6 +310,23 @@ export interface OfficialOwnedGamesResult {
   games: OfficialOwnedGameSummary[];
 }
 
+export interface OfficialRecentlyPlayedGamesOptions {
+  steamId: string;
+}
+
+export interface OfficialRecentlyPlayedGameSummary {
+  appId: number;
+  name?: string;
+  playtimeTwoWeeks?: number;
+  playtimeForever?: number;
+  iconUrl?: string;
+}
+
+export interface OfficialRecentlyPlayedGamesResult {
+  totalCount: number;
+  games: OfficialRecentlyPlayedGameSummary[];
+}
+
 export interface SteamReleaseScoutResult {
   appId: number;
   name: string;
