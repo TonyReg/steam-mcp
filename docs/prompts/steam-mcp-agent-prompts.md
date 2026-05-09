@@ -6,7 +6,7 @@ This repository exposes MCP prompts as the primary agent-facing workflow surface
 
 ### `steam_library_curator`
 
-Use this when an agent should analyze the local Steam library safely, search for candidates, explain deterministic recommendations, export results, or generate `steam://` links.
+Use this when an agent should analyze the owned Steam library safely, search for candidates, explain deterministic recommendations, export results, or generate `steam://` links.
 
 Arguments:
 
@@ -19,6 +19,8 @@ Recommended flow:
 2. `steam_library_list` or `steam_library_search`
 3. `steam_find_similar` and/or `steam_store_search` when enrichment is needed
 4. `steam_export` and `steam_link_generate`
+
+This workflow depends on API-authoritative owned-library enumeration through `GetOwnedGames`. If `steam_status` reports missing `STEAM_API_KEY`, stop and ask for configuration instead of relying on stale local data.
 
 ### `steam_collection_planner`
 
@@ -39,6 +41,8 @@ Recommended flow:
 6. `STEAM_ENABLE_WINDOWS_ORCHESTRATION=1` is a separate Windows-only opt-in wrapper: it closes Steam before each apply call but does NOT restart after a dirty-only apply (state is staged-only; sync is not complete until `finalize=true` succeeds); it restarts only after a finalize apply or after a failed apply if the wrapper stopped it.
 7. Plain apply performs the dirty stage (staged-only; not sync-complete) and `finalize=true` completes finalize; any restart after finalize is best-effort only and does not imply Steam cloud sync has completed.
 
+Actionable collection planning also depends on API-authoritative owned-library enumeration. If `steam_status` reports missing `STEAM_API_KEY`, stop and ask for configuration instead of attempting a partial local-only plan.
+
 ### `steam_deck_backlog_triage`
 
 Use this when an agent should find the best backlog candidates for Steam Deck play.
@@ -54,6 +58,8 @@ Recommended flow:
 2. `steam_library_search` with backlog and Deck filters
 3. `steam_find_similar` for deterministic ranking
 4. `steam_export` and `steam_link_generate`
+
+This workflow also depends on API-authoritative owned-library enumeration. If `steam_status` reports missing `STEAM_API_KEY`, stop and ask for configuration before triaging the backlog.
 
 ### `steam_release_scout`
 
