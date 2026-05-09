@@ -254,6 +254,9 @@ export interface StoreSearchOptions {
 export interface StoreAppDetails {
   appId: number;
   name: string;
+  type?: 'game' | 'software' | 'dlc';
+  releaseDate?: string;
+  comingSoon?: boolean;
   developers: string[];
   publishers: string[];
   genres: string[];
@@ -261,5 +264,36 @@ export interface StoreAppDetails {
   tags: string[];
   shortDescription?: string;
   headerImage?: string;
+  storeUrl: string;
+}
+
+export interface OfficialStoreAppSummary {
+  appId: number;
+  name: string;
+  lastModified?: number;
+  priceChangeNumber?: number;
+}
+
+export interface OfficialStoreAppListOptions {
+  limit?: number;
+  lastAppId?: number;
+  ifModifiedSince?: number;
+  includeGames?: boolean;
+  includeDlc?: boolean;
+  includeSoftware?: boolean;
+}
+
+export interface OfficialStoreAppListResult {
+  apps: OfficialStoreAppSummary[];
+  haveMoreResults: boolean;
+  lastAppId?: number;
+}
+
+export interface SteamReleaseScoutResult {
+  appId: number;
+  name: string;
+  type: 'game' | 'software' | 'dlc';
+  releaseDate?: string;
+  comingSoon: boolean;
   storeUrl: string;
 }
