@@ -67,13 +67,16 @@ export class CollectionService {
     ]);
     const mode = request.mode ?? 'add-only';
     const rules = normalizeRules(request);
-    const warnings = [...snapshot.sourcePath ? [] : ['Collection source path is missing.']];
+    const warnings = [
+      ...snapshot.sourcePath ? [] : ['Collection source path is missing.'],
+      ...library.warnings
+    ];
     const operations: CollectionPlan['operations'] = {};
     const matchedGames: GameRecord[] = [];
     const collectionDeletes = collectCollectionDeletes(rules, mode, policies, snapshot, warnings);
 
     for (const rule of rules) {
-      const resolvedGames = await this.resolveRuleGames(rule, library.games);
+      const resolvedGames = await this.resolveRuleGames(rule, library.games, warnings);
       for (const game of resolvedGames) {
         matchedGames.push(game);
         const key = appIdString(game.appId);
@@ -389,8 +392,12 @@ export class CollectionService {
     return ensurePathInsideRoot(path.join(plansDir, `${normalizedPlanId}.json`), plansDir, 'Collection plan path');
   }
 
-  private async resolveRuleGames(rule: CollectionRule, library: GameRecord[]): Promise<GameRecord[]> {
+  private async resolveRuleGames(rule: CollectionRule, library: GameRecord[], warnings: string[]): Promise<GameRecord[]> {
     const explicitGames = rule.appIds?.map((appId) => library.find((game) => game.appId === appId)).filter((game): game is GameRecord => game !== undefined) ?? [];
+    if (rule.appIds && explicitGames.length < rule.appIds.length) {
+      warnings.push(`Rule requested ${rule.appIds.length} appIds but resolved ${explicitGames.length} actionable games from the API-authoritative library.`);
+    }
+
     const searchedGames = rule.query ? this.searchService.searchLibrary(library, { query: rule.query, limit: 100 }).map((match) => match.item) : [];
     return uniqueGames([...explicitGames, ...searchedGames]);
   }

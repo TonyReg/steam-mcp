@@ -9,10 +9,12 @@ import {
   DeckStatusProvider,
   LibraryService,
   LinkService,
+  OfficialStoreClient,
   SearchService,
   SteamDiscoveryService,
   StoreClient
 } from '../../packages/steam-core/src/index.js';
+import type { OfficialOwnedGameSummary } from '../../packages/steam-core/src/types.js';
 import { ConfigService } from '../../packages/steam-core/src/config/index.js';
 import { SafetyService } from '../../packages/steam-core/src/safety/index.js';
 import {
@@ -54,6 +56,7 @@ async function createCollectionServiceHarness(enableWrites = true, envOverrides:
     discovery,
     registry,
     new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    createOwnedGamesClient(),
     new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
     new LinkService()
   );
@@ -76,6 +79,30 @@ async function createCollectionServiceHarness(enableWrites = true, envOverrides:
       safetyService
     )
   };
+}
+
+function defaultOwnedGames(): OfficialOwnedGameSummary[] {
+  return [
+    { appId: 440, name: 'Team Fortress 2', playtimeForever: 1200 },
+    { appId: 570, name: 'Dota 2', playtimeForever: 600 },
+    { appId: 620, name: 'Portal 2', playtimeForever: 240 }
+  ];
+}
+
+function createOwnedGamesClient(games: OfficialOwnedGameSummary[] = defaultOwnedGames()): OfficialStoreClient {
+  return new OfficialStoreClient({
+    fetchImpl: async () => new Response(JSON.stringify({
+      response: {
+        game_count: games.length,
+        games: games.map((game) => ({
+          appid: game.appId,
+          name: game.name,
+          playtime_forever: game.playtimeForever ?? 0
+        }))
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response,
+    steamWebApiKey: 'test-key'
+  });
 }
 
 class TrackingSafetyService extends SafetyService {
@@ -1553,6 +1580,7 @@ test('collection service ignores legacy favorite operations during apply', async
     discovery,
     registry,
     new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    createOwnedGamesClient(),
     new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
     new LinkService()
   );
@@ -1618,6 +1646,7 @@ test('collection service merges env default protected collections into persisted
     discovery,
     registry,
     new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    createOwnedGamesClient(),
     new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
     new LinkService()
   );
@@ -1660,6 +1689,7 @@ test('collection service excludes ignored-collection games from explicit appId r
     discovery,
     registry,
     new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    createOwnedGamesClient(),
     new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
     new LinkService()
   );
@@ -1685,6 +1715,7 @@ test('collection service excludes ignored-collection games from explicit appId r
 
   assert.deepEqual(preview.matchedGames, []);
   assert.deepEqual(preview.plan.operations, {});
+  assert.ok(preview.plan.warnings.some((warning) => warning.includes('requested 1 appIds') && warning.includes('resolved 0 actionable games')));
 });
 
 test('collection service excludes ignored-collection games from query rules', async () => {
@@ -1699,6 +1730,7 @@ test('collection service excludes ignored-collection games from query rules', as
     discovery,
     registry,
     new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    createOwnedGamesClient(),
     new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
     new LinkService()
   );
@@ -1726,6 +1758,55 @@ test('collection service excludes ignored-collection games from query rules', as
   assert.deepEqual(preview.plan.operations, {});
 });
 
+
+test('collection service propagates library stale-ref warnings into plans', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  const configService = new ConfigService(fixture.env);
+  const discovery = new SteamDiscoveryService(configService.resolve());
+  const sourcePath = path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json');
+  const document = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>;
+  document['user-collections.uc-racing'] = {
+    name: 'Backlog',
+    apps: ['2051120']
+  };
+  await writeFile(sourcePath, `${JSON.stringify(document, null, 2)}\n`, 'utf8');
+
+  const backend = new CloudStorageJsonCollectionBackend(sourcePath, fixture.steamId);
+  const registry = new CollectionBackendRegistry([backend]);
+  const library = new LibraryService(
+    discovery,
+    registry,
+    new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    createOwnedGamesClient(),
+    new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new LinkService()
+  );
+  const collectionService = new CollectionService(
+    configService,
+    discovery,
+    registry,
+    library,
+    new SearchService(),
+    new SafetyService(async () => false)
+  );
+
+  const preview = await collectionService.createPlan({
+    mode: 'merge',
+    rules: [
+      {
+        appIds: [2051120],
+        addToCollections: ['Co-op']
+      }
+    ]
+  });
+
+  assert.deepEqual(preview.matchedGames, []);
+  assert.deepEqual(preview.plan.operations, {});
+  assert.ok(preview.plan.warnings.some((warning) => warning.includes('Backlog') && warning.includes('2051120') && warning.includes('not returned by GetOwnedGames')));
+  assert.ok(preview.plan.warnings.some((warning) => warning.includes('requested 1 appIds') && warning.includes('resolved 0 actionable games')));
+});
+
 test('collection service query rules match store genres when store metadata is available', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
@@ -1746,6 +1827,7 @@ test('collection service query rules match store genres when store metadata is a
 
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
     }),
+    createOwnedGamesClient(),
     new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
     new LinkService()
   );
@@ -1792,6 +1874,7 @@ test('collection service rejects non-UUID plan identifiers', async () => {
     discovery,
     registry,
     new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    createOwnedGamesClient(),
     new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
     new LinkService()
   );
@@ -2047,6 +2130,7 @@ test('collection service rejects write targets outside the selected Steam clouds
     discovery,
     registry,
     new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    createOwnedGamesClient(),
     new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
     new LinkService()
   );
@@ -2099,6 +2183,7 @@ test('collection service rejects write targets whose cloudstorage directory reso
       discovery,
       registry,
       new StoreClient(async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+      createOwnedGamesClient(),
       new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
       new LinkService()
     );
