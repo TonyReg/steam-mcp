@@ -9,7 +9,6 @@ function createEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     ...process.env,
     LOCALAPPDATA: path.join(os.tmpdir(), 'steam-mcp-config-service-test'),
     STEAM_API_KEY: undefined,
-    STEAM_WEB_API_KEY: undefined,
     ...overrides
   };
 }
@@ -40,16 +39,12 @@ test('config service rejects invalid default protected collection env values', (
   );
 });
 
-test('config service resolves Steam Web API key from MCP env aliases', () => {
-  const fromPrimary = new ConfigService(createEnv({
+test('config service resolves Steam Web API key from STEAM_API_KEY', () => {
+  const config = new ConfigService(createEnv({
     STEAM_API_KEY: '  primary-key  '
   })).resolve();
-  assert.equal(fromPrimary.steamWebApiKey, 'primary-key');
 
-  const fromAlias = new ConfigService(createEnv({
-    STEAM_WEB_API_KEY: ' alias-key '
-  })).resolve();
-  assert.equal(fromAlias.steamWebApiKey, 'alias-key');
+  assert.equal(config.steamWebApiKey, 'primary-key');
 });
 
 test('config service trims blank Steam Web API key values to undefined', () => {

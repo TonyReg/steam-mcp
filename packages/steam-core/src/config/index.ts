@@ -10,7 +10,7 @@ export class ConfigService {
   constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
 
   resolve(): SteamRuntimeConfig {
-    const steamWebApiKey = normalizeOptionalEnvValue(this.env.STEAM_API_KEY ?? this.env.STEAM_WEB_API_KEY);
+    const steamWebApiKey = normalizeOptionalEnvValue(this.env.STEAM_API_KEY);
 
     return {
       steamId: this.env.STEAM_ID,
