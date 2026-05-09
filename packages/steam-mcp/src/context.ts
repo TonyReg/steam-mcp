@@ -40,17 +40,17 @@ export function createSteamMcpContext(env: NodeJS.ProcessEnv = process.env): Ste
   const discoveryService = new SteamDiscoveryService(config);
   const deckStatusProvider = new DeckStatusProvider();
   const linkService = new LinkService();
+  const officialStoreClient = new OfficialStoreClient({
+    steamWebApiKey: config.steamWebApiKey,
+    fetchImpl: fetch
+  });
   const storeClient = new StoreClient(createStoreAppDetailsFallbackFetch({
     fetchImpl: fetch,
-    steamWebApiKey: config.steamWebApiKey,
+    officialStoreClient,
     getSelectedUserId: async () => (await discoveryService.discover()).selectedUserId
   }), deckStatusProvider, {
     cacheDir: path.join(config.stateDirectories.metadataDir, 'store-appdetails'),
     cacheTtlMs: config.storeAppDetailsCacheTtlMs
-  });
-  const officialStoreClient = new OfficialStoreClient({
-    steamWebApiKey: config.steamWebApiKey,
-    fetchImpl: fetch
   });
 
   const backendRegistry = new CollectionBackendRegistry([], {
@@ -58,7 +58,7 @@ export function createSteamMcpContext(env: NodeJS.ProcessEnv = process.env): Ste
   });
   const safetyService = new SafetyService();
   const searchService = new SearchService();
-  const libraryService = new LibraryService(discoveryService, backendRegistry, storeClient, deckStatusProvider, linkService);
+  const libraryService = new LibraryService(discoveryService, backendRegistry, storeClient, officialStoreClient, deckStatusProvider, linkService);
   const collectionService = new CollectionService(configService, discoveryService, backendRegistry, libraryService, searchService, safetyService);
   const recommendService = new RecommendService();
   const exportService = new ExportService();

@@ -1,12 +1,13 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { parse } from '@node-steam/vdf';
-import type { CollectionSnapshot } from '../types.js';
+import type { CollectionSnapshot, GameRecord, LibraryListOptions, LibraryListResult, OfficialOwnedGameSummary, StoreAppDetails } from '../types.js';
 import type { DeckStatusProvider } from '../deck/index.js';
 import type { SteamDiscoveryService } from '../discovery/index.js';
+import { resolveSteamWebApiSteamId } from '../official-store/index.js';
+import type { OfficialStoreClient } from '../official-store/index.js';
 import type { LinkService } from '../links/index.js';
 import type { CollectionBackendRegistry } from '../collections/backend-registry/index.js';
-import type { GameRecord, LibraryListOptions, LibraryListResult, StoreAppDetails } from '../types.js';
 import type { StoreClient } from '../store/index.js';
 import { appIdString, isRecord, normalizeCollectionName, toNumber, uniqueStrings } from '../utils.js';
 
@@ -25,6 +26,7 @@ export class LibraryService {
     private readonly discoveryService: SteamDiscoveryService,
     private readonly backendRegistry: CollectionBackendRegistry,
     private readonly storeClient: StoreClient,
+    private readonly officialStoreClient: OfficialStoreClient,
     private readonly deckStatusProvider: DeckStatusProvider,
     private readonly linkService: LinkService
   ) {}
@@ -39,25 +41,20 @@ export class LibraryService {
       ? this.backendRegistry.resolve(discovery.collectionBackendId, discovery.collectionSourcePath, discovery.selectedUserId)
       : undefined;
     const snapshot = backend ? await backend.readSnapshot() : undefined;
+    const ownedGames = await this.readOwnedGames(discovery.selectedUserId, warnings);
+    const staleWarnings = snapshot ? buildStaleSnapshotWarnings(snapshot, ownedGames) : [];
+    warnings.push(...staleWarnings);
 
-    const appIds = new Set<string>([
-      ...installedApps.keys(),
-      ...localAppState.keys(),
-      ...Object.keys(snapshot?.favoritesByApp ?? {}),
-      ...Object.keys(snapshot?.hiddenByApp ?? {}),
-      ...Object.keys(snapshot?.collectionsByApp ?? {})
-    ]);
-
-    const games = await Promise.all([...appIds].map(async (appId) => {
-      const numericAppId = Number.parseInt(appId, 10);
+    const games = await Promise.all([...ownedGames.values()].map(async (owned) => {
+      const appId = appIdString(owned.appId);
       const installed = installedApps.get(appId);
       const local = localAppState.get(appId);
-      const storeMetadata = (options.includeStoreMetadata || !installed?.name) ? await this.safeGetAppDetails(numericAppId, warnings) : undefined;
-      const record = buildGameRecord(appId, installed, local, snapshot, storeMetadata, this.linkService);
+      const storeMetadata = options.includeStoreMetadata ? await this.safeGetAppDetails(owned.appId, warnings) : undefined;
+      const record = buildGameRecord(appId, owned, installed, local, snapshot, storeMetadata, this.linkService);
 
       if (shouldIncludeDeckStatus) {
         try {
-          record.deckStatus = await this.deckStatusProvider.getStatus(numericAppId);
+          record.deckStatus = await this.deckStatusProvider.getStatus(owned.appId);
         } catch (error) {
           warnings.push(`Deck status lookup failed for ${record.name}: ${error instanceof Error ? error.message : 'unknown error'}`);
         }
@@ -155,6 +152,32 @@ export class LibraryService {
     }
   }
 
+  private async readOwnedGames(selectedUserId: string | undefined, warnings: string[]): Promise<Map<string, OfficialOwnedGameSummary>> {
+    if (!selectedUserId) {
+      warnings.push('No Steam user is selected; GetOwnedGames cannot enumerate the owned library until discovery resolves a user.');
+      return new Map<string, OfficialOwnedGameSummary>();
+    }
+
+    const steamId = resolveSteamWebApiSteamId(selectedUserId);
+    if (!steamId) {
+      warnings.push('The selected Steam user could not be resolved to a SteamID64; GetOwnedGames cannot enumerate the owned library until discovery resolves a valid user.');
+      return new Map<string, OfficialOwnedGameSummary>();
+    }
+
+    try {
+      const response = await this.officialStoreClient.getOwnedGames({
+        steamId,
+        includeAppInfo: true,
+        includePlayedFreeGames: true,
+        includeFreeSub: true
+      });
+      return new Map(response.games.map((game) => [appIdString(game.appId), game]));
+    } catch (error) {
+      warnings.push(`GetOwnedGames is the authoritative source for owned-game membership. Library enumeration and collection planning are unavailable until owned games can be fetched: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return new Map<string, OfficialOwnedGameSummary>();
+    }
+  }
+
   private async safeGetAppDetails(appId: number, warnings: string[]): Promise<StoreAppDetails | undefined> {
     try {
       return await this.storeClient.getAppDetails(appId);
@@ -167,6 +190,7 @@ export class LibraryService {
 
 function buildGameRecord(
   appId: string,
+  owned: OfficialOwnedGameSummary,
   installed: InstalledAppState | undefined,
   local: LocalAppState | undefined,
   snapshot: CollectionSnapshot | undefined,
@@ -178,8 +202,8 @@ function buildGameRecord(
 
   return {
     appId: numericAppId,
-    name: installed?.name ?? storeMetadata?.name ?? `Unknown App ${appId}`,
-    playtimeMinutes: local?.playtimeMinutes,
+    name: storeMetadata?.name ?? owned.name ?? installed?.name ?? `Unknown App ${appId}`,
+    playtimeMinutes: local?.playtimeMinutes ?? owned.playtimeForever,
     lastPlayedAt: local?.lastPlayedAt,
     installed: installed !== undefined,
     hidden: snapshot?.hiddenByApp[appId] ?? false,
@@ -195,6 +219,36 @@ function buildGameRecord(
     storeUrl: storeMetadata?.storeUrl,
     steamLinks: linkService.generate(numericAppId)
   };
+}
+
+
+function buildStaleSnapshotWarnings(
+  snapshot: CollectionSnapshot,
+  ownedGames: Map<string, OfficialOwnedGameSummary>
+): string[] {
+  const warnings: string[] = [];
+  const staleAppIds = new Set<string>([
+    ...Object.keys(snapshot.favoritesByApp ?? {}),
+    ...Object.keys(snapshot.hiddenByApp ?? {}),
+    ...Object.keys(snapshot.collectionsByApp ?? {})
+  ]);
+
+  for (const appId of staleAppIds) {
+    if (ownedGames.has(appId)) {
+      continue;
+    }
+
+    const collectionNames = snapshot.collectionsByApp[appId] ?? [];
+    const labels = [
+      snapshot.favoritesByApp[appId] ? 'Favorites' : undefined,
+      snapshot.hiddenByApp[appId] ? 'Hidden' : undefined,
+      ...collectionNames
+    ].filter((label): label is string => Boolean(label));
+    const labelSummary = labels.length > 0 ? labels.join(', ') : 'snapshot metadata';
+    warnings.push(`Stale snapshot reference for app ${appId} remains visible in ${labelSummary} but is not actionable because it was not returned by GetOwnedGames.`);
+  }
+
+  return warnings;
 }
 
 function filterGame(game: GameRecord, options: LibraryListOptions): boolean {
