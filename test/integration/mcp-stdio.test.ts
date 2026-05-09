@@ -19,10 +19,16 @@ function createPreloadPath(fixtureRoot: string): string {
   return path.join(fixtureRoot, 'fetch-preload.mjs');
 }
 
-async function writeOwnedGamesFetchPreload(fixtureRoot: string, appIds: number[], appDetailsPayloadById: Record<number, string> = {}): Promise<string> {
+async function writeOwnedGamesFetchPreload(
+  fixtureRoot: string,
+  appIds: number[],
+  appDetailsPayloadById: Record<number, string> = {},
+  recentlyPlayedGames: Array<Record<string, unknown>> = []
+): Promise<string> {
   const preloadPath = createPreloadPath(fixtureRoot);
   const script = `const ownedGames = ${JSON.stringify(appIds)};
 const appDetailsPayloadById = ${JSON.stringify(appDetailsPayloadById)};
+const recentlyPlayedGames = ${JSON.stringify(recentlyPlayedGames)};
 const originalFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = async (input, init) => {
   const url = new URL(String(input));
@@ -32,6 +38,15 @@ globalThis.fetch = async (input, init) => {
       response: {
         game_count: ownedGames.length,
         games: ownedGames.map((appId) => ({ appid: appId, name: appId === 620 ? 'Portal 2' : \`Owned App \${appId}\`, playtime_forever: appId === 620 ? 240 : 0 }))
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+
+  if (url.hostname === 'api.steampowered.com' && url.pathname === '/IPlayerService/GetRecentlyPlayedGames/v1/') {
+    return new Response(JSON.stringify({
+      response: {
+        total_count: recentlyPlayedGames.length,
+        games: recentlyPlayedGames
       }
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
@@ -82,6 +97,7 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       'steam_library_list',
       'steam_library_search',
       'steam_link_generate',
+      'steam_recently_played',
       'steam_release_scout',
       'steam_status',
       'steam_store_search'
@@ -332,6 +348,95 @@ test('stdio server lists API-owned games through preload-patched GetOwnedGames',
     assert.equal(listPayload.summary.total, 1);
     assert.equal(listPayload.summary.returned, 1);
     assert.equal(listPayload.warnings?.some((warning) => warning.includes('GetOwnedGames is the authoritative source for owned-game membership')), false);
+  } finally {
+    await client.close();
+  }
+});
+
+test('stdio server returns recently played games through preload-patched GetRecentlyPlayedGames', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  fixture.env.STEAM_API_KEY = 'test-key';
+  const preloadPath = await writeOwnedGamesFetchPreload(
+    fixture.rootDir,
+    [],
+    {},
+    [
+      { appid: 620, name: 'Portal 2', playtime_2weeks: 45, playtime_forever: 240, img_icon_url: 'icon-620' },
+      { appid: 440, name: 'Team Fortress 2', playtime_2weeks: 30, playtime_forever: 1200, img_icon_url: 'icon-440' }
+    ]
+  );
+  fixture.env.NODE_OPTIONS = [fixture.env.NODE_OPTIONS, `--import=${pathToFileURL(preloadPath).href}`].filter(Boolean).join(' ');
+
+  const client = new Client({ name: 'steam-mcp-test-client-recently-played', version: '0.1.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(repoRoot, 'packages', 'steam-mcp', 'dist', 'index.js')],
+    cwd: repoRoot,
+    env: fixture.env,
+    stderr: 'pipe'
+  });
+
+  await client.connect(transport);
+
+  try {
+    const result = await client.callTool({
+      name: 'steam_recently_played',
+      arguments: {
+        limit: 1
+      }
+    });
+    const payload = parseFirstTextContent(result) as {
+      totalCount: number;
+      games: Array<{
+        appId: number;
+        name?: string;
+        playtimeTwoWeeks?: number;
+        playtimeForever?: number;
+        iconUrl?: string;
+      }>;
+    };
+
+    assert.equal(payload.totalCount, 2);
+    assert.deepEqual(payload.games, [
+      {
+        appId: 620,
+        name: 'Portal 2',
+        playtimeTwoWeeks: 45,
+        playtimeForever: 240,
+        iconUrl: 'icon-620'
+      }
+    ]);
+  } finally {
+    await client.close();
+  }
+});
+
+test('stdio server returns explicit missing-key error for steam_recently_played', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  delete fixture.env.STEAM_API_KEY;
+
+  const client = new Client({ name: 'steam-mcp-test-client-recently-played-missing-key', version: '0.1.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(repoRoot, 'packages', 'steam-mcp', 'dist', 'index.js')],
+    cwd: repoRoot,
+    env: fixture.env,
+    stderr: 'pipe'
+  });
+
+  await client.connect(transport);
+
+  try {
+    const result = await client.callTool({
+      name: 'steam_recently_played',
+      arguments: {}
+    });
+    const payload = parseFirstTextContent(result) as { error: string };
+    assert.deepEqual(payload, {
+      error: 'Steam Web API key is required for official recently-played access. Set STEAM_API_KEY.'
+    });
   } finally {
     await client.close();
   }
