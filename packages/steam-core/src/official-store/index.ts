@@ -39,7 +39,7 @@ export class OfficialStoreClient {
 
   async getAppList(request: OfficialStoreAppListOptions = {}): Promise<OfficialStoreAppListResult> {
     const response = await this.fetchServiceInterfaceJson(
-      'https://partner.steam-api.com/IStoreService/GetAppList/v1/',
+      'https://api.steampowered.com/IStoreService/GetAppList/v1/',
       {
         max_results: request.limit,
         last_appid: request.lastAppId,

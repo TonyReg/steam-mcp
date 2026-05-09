@@ -59,7 +59,7 @@ test('official store client calls GetAppList with runtime API key and normalizes
   });
 
   const requestUrl = new URL(requestedUrls[0] ?? '');
-  assert.equal(requestUrl.toString().startsWith('https://partner.steam-api.com/IStoreService/GetAppList/v1/'), true);
+  assert.equal(requestUrl.toString().startsWith('https://api.steampowered.com/IStoreService/GetAppList/v1/'), true);
   assert.equal(requestUrl.searchParams.get('key'), 'test-key');
   assert.equal(requestUrl.searchParams.get('max_results'), null);
   assert.equal(requestUrl.searchParams.get('last_appid'), null);
