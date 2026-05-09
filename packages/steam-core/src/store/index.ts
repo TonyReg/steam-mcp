@@ -232,6 +232,9 @@ function normalizeAppDetails(appId: number, payload: unknown): StoreAppDetails |
   return {
     appId,
     name,
+    type: readStoreAppType(data.type),
+    releaseDate: readReleaseDate(data.release_date)?.date,
+    comingSoon: readReleaseDate(data.release_date)?.comingSoon,
     developers: uniqueStrings(readObjectNameArray(data.developers)),
     publishers: uniqueStrings(readObjectNameArray(data.publishers)),
     genres: uniqueStrings(readObjectNameArray(data.genres)),
@@ -278,6 +281,9 @@ function readPersistedAppDetails(value: unknown, appId: number): StoreAppDetails
   const details: StoreAppDetails = {
     appId,
     name,
+    type: readStoreAppType(value.type),
+    releaseDate: typeof value.releaseDate === 'string' ? value.releaseDate : undefined,
+    comingSoon: typeof value.comingSoon === 'boolean' ? value.comingSoon : undefined,
     developers: readStringArray(value.developers),
     publishers: readStringArray(value.publishers),
     genres: readStringArray(value.genres),
@@ -301,8 +307,31 @@ function isCacheableAppDetails(details: StoreAppDetails): boolean {
     || hasNonBlankEntries(details.genres)
     || hasNonBlankEntries(details.categories)
     || hasNonBlankEntries(details.tags)
+    || hasNonBlankValue(details.releaseDate)
+    || details.comingSoon !== undefined
+    || details.type !== undefined
     || hasNonBlankValue(details.shortDescription)
     || hasNonBlankValue(details.headerImage);
+}
+
+function readStoreAppType(value: unknown): StoreAppDetails['type'] {
+  return value === 'game' || value === 'software' || value === 'dlc'
+    ? value
+    : undefined;
+}
+
+function readReleaseDate(value: unknown): { date?: string; comingSoon?: boolean } | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const date = typeof value.date === 'string' ? value.date : undefined;
+  const comingSoon = typeof value.coming_soon === 'boolean' ? value.coming_soon : undefined;
+  if (date === undefined && comingSoon === undefined) {
+    return undefined;
+  }
+
+  return { date, comingSoon };
 }
 
 function hasNonBlankEntries(values: string[]): boolean {

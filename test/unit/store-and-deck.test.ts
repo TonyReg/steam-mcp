@@ -3,7 +3,8 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { DeckStatusProvider, StoreClient } from '@steam-mcp/steam-core';
+import { DeckStatusProvider } from '../../packages/steam-core/src/deck/index.js';
+import { StoreClient } from '../../packages/steam-core/src/store/index.js';
 
 test('store client and deck provider normalize fixture payloads', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
@@ -29,6 +30,9 @@ test('store client and deck provider normalize fixture payloads', async () => {
   assert.ok(details);
   assert.equal(details.name, 'Portal 2');
   assert.deepEqual(details.genres, ['Adventure', 'Puzzle']);
+  assert.equal(details.type, 'game');
+  assert.equal(details.releaseDate, 'Apr 18, 2011');
+  assert.equal(details.comingSoon, false);
 });
 
 test('store client normalizes sparse appdetails payloads', async () => {
@@ -48,6 +52,9 @@ test('store client normalizes sparse appdetails payloads', async () => {
   assert.deepEqual(details.developers, []);
   assert.deepEqual(details.publishers, []);
   assert.deepEqual(details.tags, []);
+  assert.equal(details.type, undefined);
+  assert.equal(details.releaseDate, undefined);
+  assert.equal(details.comingSoon, undefined);
   assert.equal(details.storeUrl, 'https://store.steampowered.com/app/620/');
 });
 

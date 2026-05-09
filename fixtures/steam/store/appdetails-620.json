@@ -3,6 +3,11 @@
     "success": true,
     "data": {
       "name": "Portal 2",
+      "type": "game",
+      "release_date": {
+        "coming_soon": false,
+        "date": "Apr 18, 2011"
+      },
       "developers": [
         "Valve"
       ],
