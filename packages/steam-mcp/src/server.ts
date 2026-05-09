@@ -10,6 +10,7 @@ import { registerSteamLibraryListTool } from './tools/steam-library-list.js';
 import { registerSteamLibrarySearchTool } from './tools/steam-library-search.js';
 import { registerSteamLinkGenerateTool } from './tools/steam-link-generate.js';
 import { registerSteamStatusTool } from './tools/steam-status.js';
+import { registerSteamReleaseScoutTool } from './tools/steam-release-scout.js';
 import { registerSteamStoreSearchTool } from './tools/steam-store-search.js';
 
 export function createServer(env: NodeJS.ProcessEnv = process.env, context: SteamMcpContext = createSteamMcpContext(env)): McpServer {
@@ -22,6 +23,7 @@ export function createServer(env: NodeJS.ProcessEnv = process.env, context: Stea
   registerSteamLibraryListTool(server, context);
   registerSteamLibrarySearchTool(server, context);
   registerSteamStoreSearchTool(server, context);
+  registerSteamReleaseScoutTool(server, context);
   registerSteamFindSimilarTool(server, context);
   registerSteamCollectionPlanTool(server, context);
   registerSteamCollectionApplyTool(server, context);
