@@ -85,13 +85,14 @@ async function fetchOwnedGameName(
       return undefined;
     }
 
+    const numericAppId = Number.parseInt(appId, 10);
     const url = new URL('https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/');
     url.searchParams.set('key', steamWebApiKey);
-    url.searchParams.set('steamid', steamId);
-    url.searchParams.set('include_appinfo', '1');
-    url.searchParams.set('include_played_free_games', '1');
-    url.searchParams.set('appids_filter[0]', appId);
     url.searchParams.set('format', 'json');
+    url.searchParams.set(
+      'input_json',
+      `{"steamid":${steamId},"include_appinfo":true,"include_played_free_games":true,"appids_filter":[${numericAppId}]}`
+    );
 
     const response = await fetchImpl(url, { headers: { accept: 'application/json' } });
     if (!response.ok) {

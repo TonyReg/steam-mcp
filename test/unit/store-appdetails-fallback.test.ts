@@ -38,11 +38,15 @@ test('fallback calls GetOwnedGames with converted SteamID64 and returns syntheti
 
   const apiUrl = new URL(requestedUrls.find((entry) => entry.includes('IPlayerService/GetOwnedGames')) ?? '');
   assert.equal(apiUrl.searchParams.get('key'), 'test-key');
-  assert.equal(apiUrl.searchParams.get('steamid'), '76561198896077867');
-  assert.equal(apiUrl.searchParams.get('include_appinfo'), '1');
-  assert.equal(apiUrl.searchParams.get('include_played_free_games'), '1');
-  assert.equal(apiUrl.searchParams.get('appids_filter[0]'), '2051120');
+  assert.equal(apiUrl.searchParams.get('steamid'), null);
+  assert.equal(apiUrl.searchParams.get('include_appinfo'), null);
+  assert.equal(apiUrl.searchParams.get('include_played_free_games'), null);
+  assert.equal(apiUrl.searchParams.get('appids_filter[0]'), null);
   assert.equal(apiUrl.searchParams.get('format'), 'json');
+  assert.equal(
+    apiUrl.searchParams.get('input_json'),
+    '{"steamid":76561198896077867,"include_appinfo":true,"include_played_free_games":true,"appids_filter":[2051120]}'
+  );
 });
 
 test('fallback preserves successful storefront payloads without calling the Web API', async () => {
