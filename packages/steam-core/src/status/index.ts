@@ -24,9 +24,9 @@ export class StatusService {
     const warnings = [...discovery.warnings];
 
     if (!runtimeConfig.steamWebApiKey) {
-      warnings.push('Steam Web API key not available in MCP runtime; owned non-installed game names may remain "Unknown App ..." when storefront metadata is unreachable.');
+      warnings.push('GetOwnedGames is the authoritative source for owned-game membership. Library enumeration and collection planning are unavailable until STEAM_API_KEY is configured.');
     } else if (!discovery.selectedUserId) {
-      warnings.push('Steam Web API key is available, but no Steam user is selected; owned-game metadata fallback is inactive until discovery resolves a user.');
+      warnings.push('Steam Web API access is configured, but no Steam user is selected. GetOwnedGames cannot enumerate the owned library until discovery resolves a user.');
     }
 
     if (runtimeConfig.windowsOrchestrationEnabled && !windowsOrchestrationSupported) {

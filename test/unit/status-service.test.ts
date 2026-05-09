@@ -87,3 +87,34 @@ test('status service warns when orchestration is enabled on an unsupported platf
   assert.equal(status.windowsOrchestrationSupported, false);
   assert.ok(status.warnings.some((warning) => warning.includes('Windows orchestration is enabled, but this runtime is not supported')));
 });
+
+
+test('status service warns when STEAM_API_KEY is missing for API-authoritative membership', async () => {
+  const configService = createConfig({
+    STEAM_API_KEY: ''
+  });
+  const discoveryService = { discover: async () => createDiscovery() };
+  const safetyService = new TestSafetyService(false, true);
+  const statusService = new StatusService(configService, discoveryService as never, safetyService);
+
+  const status = await statusService.getStatus();
+
+  assert.ok(status.warnings.some((warning) => warning.includes('GetOwnedGames is the authoritative source for owned-game membership') && warning.includes('Library enumeration and collection planning')));
+});
+
+test('status service warns when no Steam user is selected for API-authoritative membership', async () => {
+  const configService = createConfig();
+  const discoveryService = {
+    discover: async () => ({
+      ...createDiscovery(),
+      selectedUserId: undefined,
+      selectedUserDir: undefined
+    })
+  };
+  const safetyService = new TestSafetyService(false, true);
+  const statusService = new StatusService(configService, discoveryService as never, safetyService);
+
+  const status = await statusService.getStatus();
+
+  assert.ok(status.warnings.some((warning) => warning.includes('no Steam user is selected') && warning.includes('GetOwnedGames')));
+});

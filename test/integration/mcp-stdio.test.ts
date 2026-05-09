@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { materializeSteamFixture } from '../support/fixture-steam.js';
@@ -11,6 +13,43 @@ function parseFirstTextContent(result: { content?: Array<{ type: string; text?: 
   assert.equal(firstContent.type, 'text');
   assert.equal(typeof firstContent.text, 'string');
   return JSON.parse(firstContent.text);
+}
+
+function createPreloadPath(fixtureRoot: string): string {
+  return path.join(fixtureRoot, 'fetch-preload.mjs');
+}
+
+async function writeOwnedGamesFetchPreload(fixtureRoot: string, appIds: number[], appDetailsPayloadById: Record<number, string> = {}): Promise<string> {
+  const preloadPath = createPreloadPath(fixtureRoot);
+  const script = `const ownedGames = ${JSON.stringify(appIds)};
+const appDetailsPayloadById = ${JSON.stringify(appDetailsPayloadById)};
+const originalFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = async (input, init) => {
+  const url = new URL(String(input));
+
+  if (url.hostname === 'api.steampowered.com' && url.pathname === '/IPlayerService/GetOwnedGames/v1/') {
+    return new Response(JSON.stringify({
+      response: {
+        game_count: ownedGames.length,
+        games: ownedGames.map((appId) => ({ appid: appId, name: appId === 620 ? 'Portal 2' : \`Owned App \${appId}\`, playtime_forever: appId === 620 ? 240 : 0 }))
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+
+  if (url.hostname === 'store.steampowered.com' && url.pathname === '/api/appdetails') {
+    const appId = Number(url.searchParams.get('appids'));
+    const payload = appDetailsPayloadById[appId];
+    if (payload) {
+      return new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+  }
+
+  return originalFetch(input, init);
+};
+`;
+
+  await writeFile(preloadPath, script, 'utf8');
+  return preloadPath;
 }
 
 test('stdio server registers exact tools and answers basic calls', async () => {
@@ -135,7 +174,7 @@ test('stdio server reports missing Steam Web API key in status', async () => {
     };
 
     assert.equal(statusPayload.steamWebApiKeyAvailable, false);
-    assert.ok(statusPayload.warnings.some((warning) => warning.includes('Steam Web API key not available in MCP runtime')));
+    assert.ok(statusPayload.warnings.some((warning) => warning.includes('GetOwnedGames is the authoritative source for owned-game membership')));
   } finally {
     await client.close();
   }
@@ -165,7 +204,7 @@ test('stdio server reports Steam Web API key availability when configured', asyn
     };
 
     assert.equal(statusPayload.steamWebApiKeyAvailable, true);
-    assert.equal(statusPayload.warnings.some((warning) => warning.includes('Steam Web API key not available in MCP runtime')), false);
+    assert.equal(statusPayload.warnings.some((warning) => warning.includes('GetOwnedGames is the authoritative source for owned-game membership')), false);
   } finally {
     await client.close();
   }
@@ -245,9 +284,54 @@ test('stdio server applies env-configured default protected collections', async 
       games: Array<{ appId: number }>;
       summary: { total: number; returned: number };
     };
-    assert.deepEqual(listPayload.games.map((game) => game.appId).sort((left, right) => left - right), [440, 570]);
-    assert.equal(listPayload.summary.total, 3);
-    assert.equal(listPayload.summary.returned, 2);
+    assert.deepEqual(listPayload.games, []);
+    assert.equal(listPayload.summary.total, 0);
+    assert.equal(listPayload.summary.returned, 0);
+  } finally {
+    await client.close();
+  }
+});
+
+
+test('stdio server lists API-owned games through preload-patched GetOwnedGames', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  fixture.env.STEAM_API_KEY = 'test-key';
+  const appDetails620 = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-620.json'), 'utf8');
+  const preloadPath = await writeOwnedGamesFetchPreload(fixture.rootDir, [620], { 620: appDetails620 });
+  fixture.env.NODE_OPTIONS = [fixture.env.NODE_OPTIONS, `--import=${pathToFileURL(preloadPath).href}`].filter(Boolean).join(' ');
+
+  const client = new Client({ name: 'steam-mcp-test-client-owned-games', version: '0.1.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(repoRoot, 'packages', 'steam-mcp', 'dist', 'index.js')],
+    cwd: repoRoot,
+    env: fixture.env,
+    stderr: 'pipe'
+  });
+
+  await client.connect(transport);
+
+  try {
+    const listResult = await client.callTool({
+      name: 'steam_library_list',
+      arguments: {
+        limit: 10
+      }
+    });
+    const listPayload = parseFirstTextContent(listResult) as {
+      games: Array<{ appId: number; name: string; tags?: string[]; storeUrl?: string }>;
+      summary: { total: number; returned: number };
+      warnings?: string[];
+    };
+
+    assert.deepEqual(listPayload.games.map((game) => game.appId), [620]);
+    assert.equal(listPayload.games[0]?.name, 'Portal 2');
+    assert.deepEqual((listPayload.games[0]?.tags ?? []).slice().sort((left, right) => left.localeCompare(right)), ['Co-op', 'Puzzle']);
+    assert.equal(listPayload.games[0]?.storeUrl, 'https://store.steampowered.com/app/620/');
+    assert.equal(listPayload.summary.total, 1);
+    assert.equal(listPayload.summary.returned, 1);
+    assert.equal(listPayload.warnings?.some((warning) => warning.includes('GetOwnedGames is the authoritative source for owned-game membership')), false);
   } finally {
     await client.close();
   }
