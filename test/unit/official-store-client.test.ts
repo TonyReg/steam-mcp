@@ -61,13 +61,23 @@ test('official store client calls GetAppList with runtime API key and normalizes
   const requestUrl = new URL(requestedUrls[0] ?? '');
   assert.equal(requestUrl.toString().startsWith('https://partner.steam-api.com/IStoreService/GetAppList/v1/'), true);
   assert.equal(requestUrl.searchParams.get('key'), 'test-key');
-  assert.equal(requestUrl.searchParams.get('max_results'), '2');
-  assert.equal(requestUrl.searchParams.get('last_appid'), '600');
-  assert.equal(requestUrl.searchParams.get('if_modified_since'), '1713000000');
-  assert.equal(requestUrl.searchParams.get('include_games'), 'false');
-  assert.equal(requestUrl.searchParams.get('include_dlc'), 'true');
-  assert.equal(requestUrl.searchParams.get('include_software'), 'true');
+  assert.equal(requestUrl.searchParams.get('max_results'), null);
+  assert.equal(requestUrl.searchParams.get('last_appid'), null);
+  assert.equal(requestUrl.searchParams.get('if_modified_since'), null);
+  assert.equal(requestUrl.searchParams.get('include_games'), null);
+  assert.equal(requestUrl.searchParams.get('include_dlc'), null);
+  assert.equal(requestUrl.searchParams.get('include_software'), null);
   assert.equal(requestUrl.searchParams.get('format'), 'json');
+
+  const inputJson = JSON.parse(requestUrl.searchParams.get('input_json') ?? '{}') as Record<string, unknown>;
+  assert.deepEqual(inputJson, {
+    max_results: 2,
+    last_appid: 600,
+    if_modified_since: 1713000000,
+    include_games: false,
+    include_dlc: true,
+    include_software: true
+  });
 });
 
 test('official store client returns an explicit missing-key error before fetching', async () => {
@@ -87,4 +97,109 @@ test('official store client surfaces non-ok HTTP failures', async () => {
   });
 
   await assert.rejects(() => client.getAppList(), /Official store catalog request failed with status 503\./);
+});
+
+test('official store client calls GetOwnedGames with input_json-only steamid and normalizes results', async () => {
+  const requestedUrls: string[] = [];
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      requestedUrls.push(url.toString());
+      return new Response(JSON.stringify({
+        response: {
+          game_count: 2,
+          games: [
+            {
+              appid: 440,
+              name: 'Team Fortress 2',
+              playtime_forever: 123,
+              img_icon_url: 'icon-440',
+              has_community_visible_stats: true
+            },
+            {
+              appid: 620,
+              name: 'Portal 2'
+            }
+          ]
+        }
+      }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }
+  });
+
+  const result = await client.getOwnedGames({
+    steamId: '76561198000000000',
+    includeAppInfo: true,
+    includePlayedFreeGames: true,
+    includeFreeSub: true,
+    appIdsFilter: [440, 620]
+  });
+
+  assert.deepEqual(result, {
+    gameCount: 2,
+    games: [
+      {
+        appId: 440,
+        name: 'Team Fortress 2',
+        playtimeForever: 123,
+        iconUrl: 'icon-440',
+        hasCommunityVisibleStats: true
+      },
+      {
+        appId: 620,
+        name: 'Portal 2',
+        playtimeForever: undefined,
+        iconUrl: undefined,
+        hasCommunityVisibleStats: undefined
+      }
+    ]
+  });
+
+  const requestUrl = new URL(requestedUrls[0] ?? '');
+  assert.equal(requestUrl.toString().startsWith('https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/'), true);
+  assert.equal(requestUrl.searchParams.get('key'), 'test-key');
+  assert.equal(requestUrl.searchParams.get('format'), 'json');
+  assert.equal(requestUrl.searchParams.get('steamid'), null);
+  assert.equal(requestUrl.searchParams.get('include_appinfo'), null);
+  assert.equal(requestUrl.searchParams.get('include_played_free_games'), null);
+  assert.equal(requestUrl.searchParams.get('include_free_sub'), null);
+  assert.equal(requestUrl.searchParams.get('appids_filter[0]'), null);
+
+  const inputJson = JSON.parse(requestUrl.searchParams.get('input_json') ?? '{}') as Record<string, unknown>;
+  assert.deepEqual(inputJson, {
+    steamid: '76561198000000000',
+    include_appinfo: true,
+    include_played_free_games: true,
+    include_free_sub: true,
+    appids_filter: [440, 620]
+  });
+});
+
+test('official store client rejects owned-games calls when no API key is configured', async () => {
+  const client = new OfficialStoreClient({
+    fetchImpl: async () => {
+      throw new Error('fetch should not run');
+    }
+  });
+
+  await assert.rejects(() => client.getOwnedGames({
+    steamId: '76561198000000000',
+    includeAppInfo: true,
+    includePlayedFreeGames: true,
+    includeFreeSub: true
+  }), /STEAM_API_KEY/);
+});
+
+test('official store client surfaces non-ok HTTP failures for owned-games requests', async () => {
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async () => new Response('upstream failure', { status: 502 })
+  });
+
+  await assert.rejects(() => client.getOwnedGames({
+    steamId: '76561198000000000',
+    includeAppInfo: true,
+    includePlayedFreeGames: true,
+    includeFreeSub: true
+  }), /Official owned-games request failed with status 502\./);
 });

@@ -289,6 +289,27 @@ export interface OfficialStoreAppListResult {
   lastAppId?: number;
 }
 
+export interface OfficialOwnedGamesOptions {
+  steamId: string;
+  includeAppInfo: boolean;
+  includePlayedFreeGames: boolean;
+  includeFreeSub: boolean;
+  appIdsFilter?: number[];
+}
+
+export interface OfficialOwnedGameSummary {
+  appId: number;
+  name?: string;
+  playtimeForever?: number;
+  iconUrl?: string;
+  hasCommunityVisibleStats?: boolean;
+}
+
+export interface OfficialOwnedGamesResult {
+  gameCount: number;
+  games: OfficialOwnedGameSummary[];
+}
+
 export interface SteamReleaseScoutResult {
   appId: number;
   name: string;
