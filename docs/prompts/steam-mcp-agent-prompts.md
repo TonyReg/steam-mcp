@@ -55,6 +55,23 @@ Recommended flow:
 3. `steam_find_similar` for deterministic ranking
 4. `steam_export` and `steam_link_generate`
 
+### `steam_release_scout`
+
+Use this when an agent should scout upcoming or newly released Steam catalog apps through the authenticated official catalog path.
+
+Arguments:
+
+- `limit` (optional string integer, for example `"20"`; defaults to `20` in the prompt guidance)
+- `types` (optional comma-separated string, for example `"game,dlc"`)
+- `comingSoonOnly` (optional boolean string: `"true"` or `"false"`; defaults to `true` in the prompt guidance)
+
+Recommended flow:
+
+1. `steam_status`
+2. `steam_release_scout`
+3. `steam_store_search`, `steam_find_similar`, or `steam_link_generate` when deeper comparison or links are useful
+4. `steam_export` for JSON or Markdown handoff
+
 ## Safety notes
 
 - Prompts never bypass runtime safeguards.

@@ -8,6 +8,7 @@
 - List and filter owned games with `steam_library_list`
 - Search the local library with `steam_library_search`
 - Search the public Steam store with `steam_store_search`
+- Scout upcoming public Steam releases with `steam_release_scout`
 - Find similar games deterministically with `steam_find_similar`
 - Export results as JSON or Markdown with `steam_export`
 - Generate `steam://` and web links with `steam_link_generate`
@@ -68,6 +69,7 @@ If your MCP client supports prompts, `steam-mcp` includes built-in workflows for
 - `steam_library_curator` — safe library analysis, search, recommendations, exports, and links
 - `steam_collection_planner` — plan-first collection or hidden-state changes with protected-collection awareness
 - `steam_deck_backlog_triage` — shortlist Steam Deck-friendly backlog candidates
+- `steam_release_scout` — read-only workflow for upcoming or newly released Steam catalog scouting
 
 ## Environment variables
 
@@ -78,6 +80,7 @@ If your MCP client supports prompts, `steam-mcp` includes built-in workflows for
 - `STEAM_USERDATA_DIR` — override the Steam userdata directory
 - `STEAM_MCP_STATE_DIR` — override where MCP-owned plans, backups, logs, and metadata cache files are stored
 - `STEAM_STORE_TTL_DAYS` — positive integer day count before persisted store metadata is treated as stale and refreshed on next access; defaults to `30`
+- `STEAM_API_KEY` — Steam Web API key used for authenticated official catalog access and owned-game fallback metadata
 
 ### Safety and default collection behavior
 
@@ -101,6 +104,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 | `steam_library_list` | Enumerate owned games with filters such as collections, favorites, play state, and Deck status |
 | `steam_library_search` | Search the local library with deterministic match reasons |
 | `steam_store_search` | Search the public Steam store without authenticated session reuse |
+| `steam_release_scout` | Read-only upcoming/recent release scouting via official catalog access plus public appdetails enrichment; requires a Steam Web API key |
 | `steam_find_similar` | Rank similar library or store candidates deterministically |
 | `steam_collection_plan` | Create a durable preview plan for collection or hidden-state changes |
 | `steam_collection_apply` | Apply a generated plan when writes are enabled; plain apply performs the dirty stage, `finalize=true` completes finalize, and optional Windows orchestration can close Steam around apply calls, leave Steam closed after a dirty-only apply, and best-effort relaunch after finalize or a failed apply when the wrapper stopped Steam |
@@ -112,6 +116,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 - This is a local `stdio` MCP server, not a hosted service
 - The project is Windows-first and assumes a local Steam installation
 - Steam store and Steam Deck data are used as read-only enrichment sources
+- `steam_release_scout` is read-only and fails explicitly when no Steam Web API key is available
 - Collection changes should follow the plan-first flow: preview with `steam_collection_plan`, then apply only after explicit confirmation and with writes enabled
 - Collection sync is explicitly limited to cloudstorage JSON files; it does not modify `localconfig.vdf`, LevelDB, `sharedconfig.vdf`, or undocumented Steam APIs
 - `steam_collection_apply` uses a staged flow: omit `finalize` for the default dirty stage, then call again with `finalize=true` to complete finalize

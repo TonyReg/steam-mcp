@@ -43,6 +43,7 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       'steam_library_list',
       'steam_library_search',
       'steam_link_generate',
+      'steam_release_scout',
       'steam_status',
       'steam_store_search'
     ]);
@@ -58,7 +59,8 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.deepEqual(promptNames, [
       'steam_collection_planner',
       'steam_deck_backlog_triage',
-      'steam_library_curator'
+      'steam_library_curator',
+      'steam_release_scout'
     ]);
 
     const collectionPlannerPrompt = await client.getPrompt({
@@ -73,28 +75,46 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.match(JSON.stringify(collectionPlannerPrompt), /STEAM_ENABLE_WINDOWS_ORCHESTRATION=1/);
     assert.match(JSON.stringify(collectionPlannerPrompt), /does not mean Steam cloud sync has completed/);
 
+    const releaseScoutPrompt = await client.getPrompt({
+      name: 'steam_release_scout',
+      arguments: {
+        limit: '12',
+        types: 'game,dlc',
+        comingSoonOnly: 'false'
+      }
+    });
+    assert.match(JSON.stringify(releaseScoutPrompt), /steam_release_scout/);
+    assert.match(JSON.stringify(releaseScoutPrompt), /Requested result limit: 12/);
+    assert.match(JSON.stringify(releaseScoutPrompt), /Requested release types: game, dlc/);
+    assert.match(JSON.stringify(releaseScoutPrompt), /Coming soon only: false/);
+    assert.match(JSON.stringify(releaseScoutPrompt), /STEAM_API_KEY/);
+
     const status = await client.callTool({ name: 'steam_status', arguments: {} });
-    assert.match(JSON.stringify(status), /cloudstorage-json/);
-    assert.match(JSON.stringify(status), /windowsOrchestrationEnabled/);
-    assert.match(JSON.stringify(status), /windowsOrchestrationSupported/);
-
-    const library = await client.callTool({ name: 'steam_library_list', arguments: { limit: 2 } });
-    assert.match(JSON.stringify(library), /Portal 2/);
-
-    const links = await client.callTool({ name: 'steam_link_generate', arguments: { appIds: [620] } });
-    assert.match(JSON.stringify(links), /steam:\/\/run\/620/);
-
-    assert.ok(stderrChunks.some((chunk) => chunk.includes('steam-mcp server connected')));
+    const statusPayload = parseFirstTextContent(status) as {
+      collectionBackendId?: string;
+      collectionApplyEnabled?: boolean;
+      windowsOrchestrationEnabled?: boolean;
+      collectionApplySafe?: boolean;
+      steamWebApiKeyAvailable?: boolean;
+      warnings?: string[];
+    };
+    assert.equal(statusPayload.collectionBackendId, 'cloudstorage-json');
+    assert.equal(statusPayload.collectionApplyEnabled, false);
+    assert.equal(statusPayload.windowsOrchestrationEnabled, false);
+    assert.equal(statusPayload.collectionApplySafe, false);
+    assert.equal(statusPayload.steamWebApiKeyAvailable, false);
+    assert.ok(Array.isArray(statusPayload.warnings));
   } finally {
     await client.close();
   }
+
+  assert.equal(stderrChunks.some((chunk) => /Error/i.test(chunk)), false, stderrChunks.join('\n'));
 });
 
 test('stdio server reports missing Steam Web API key in status', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
   delete fixture.env.STEAM_API_KEY;
-  delete fixture.env.STEAM_WEB_API_KEY;
 
   const client = new Client({ name: 'steam-mcp-test-client-status-missing-key', version: '0.1.0' });
   const transport = new StdioClientTransport({

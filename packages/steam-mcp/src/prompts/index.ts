@@ -22,6 +22,48 @@ const steamDeckBacklogPromptArgs = {
 };
 const steamDeckBacklogPromptSchema = z.object(steamDeckBacklogPromptArgs);
 
+const steamReleaseScoutPromptTypeSchema = z.enum(['game', 'software', 'dlc']);
+type SteamReleaseScoutPromptType = z.infer<typeof steamReleaseScoutPromptTypeSchema>;
+
+const steamReleaseScoutPromptArgs = {
+  limit: z.string().optional().describe('Optional integer result limit as a string, for example "20".'),
+  types: z.string().optional().describe('Optional comma-separated release types string, for example "game,dlc".'),
+  comingSoonOnly: z.string().optional().describe('Optional boolean string: "true" or "false".')
+};
+const steamReleaseScoutPromptSchema = z.object(steamReleaseScoutPromptArgs);
+
+function parseSteamReleaseScoutPromptLimit(rawLimit: string | undefined): number | undefined {
+  const trimmed = rawLimit?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return z.coerce.number().int().min(1).max(100).parse(trimmed);
+}
+
+function parseSteamReleaseScoutPromptTypes(rawTypes: string | undefined): SteamReleaseScoutPromptType[] | undefined {
+  const trimmed = rawTypes?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const values = trimmed.split(',').map((value) => value.trim()).filter((value): value is string => value.length > 0);
+  if (values.length === 0) {
+    return undefined;
+  }
+
+  return z.array(steamReleaseScoutPromptTypeSchema).parse(values);
+}
+
+function parseSteamReleaseScoutPromptComingSoonOnly(rawComingSoonOnly: string | undefined): boolean | undefined {
+  const trimmed = rawComingSoonOnly?.trim().toLowerCase();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return z.enum(['true', 'false']).transform((value) => value === 'true').parse(trimmed);
+}
+
 export function registerSteamPrompts(server: McpServer, context: SteamMcpContext): void {
   registerPromptShallow(
     server,
@@ -119,6 +161,45 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               '3. Use steam_find_similar when you need to rank candidates by overlap with the user’s known favorites or recent play patterns.',
               '4. Use steam_export to produce a Markdown shortlist or JSON payload, and steam_link_generate to provide store/library/launch links for the finalists.',
               '5. Keep the reasoning explicit and deterministic: Deck status, genres, tags, collections, favorites, hidden flags, and playtime.'
+            ].join('\n')
+          }
+        }]
+      };
+    }
+  );
+
+  registerPromptShallow(
+    server,
+    'steam_release_scout',
+    {
+      title: 'Steam release scout',
+      description: 'Guide an agent through read-only official catalog scouting for upcoming or newly released Steam apps.',
+      argsSchema: steamReleaseScoutPromptArgs
+    },
+    (rawArgs: unknown) => {
+      const parsedArgs = steamReleaseScoutPromptSchema.parse(rawArgs);
+      const limit = parseSteamReleaseScoutPromptLimit(parsedArgs.limit);
+      const types = parseSteamReleaseScoutPromptTypes(parsedArgs.types);
+      const comingSoonOnly = parseSteamReleaseScoutPromptComingSoonOnly(parsedArgs.comingSoonOnly);
+      const selectedTypes = types?.length ? types.join(', ') : 'game, software, dlc';
+      return {
+        description: 'Read-only workflow for scouting official Steam catalog releases using authenticated catalog access plus public appdetails enrichment.',
+        messages: [{
+          role: 'user',
+          content: {
+            type: 'text',
+            text: [
+              'Use the Steam MCP to scout Steam releases safely.',
+              `Requested result limit: ${limit ?? 20}.`,
+              `Requested release types: ${selectedTypes}.`,
+              `Coming soon only: ${comingSoonOnly ?? true}.`,
+              'Workflow:',
+              '1. Call steam_status first and confirm the detected Steam user and whether the Steam Web API key is available in MCP runtime.',
+              '2. Use steam_release_scout for the primary scouting pass. Keep the workflow read-only and do not fall back to any write path.',
+              '3. If the user wants deeper context on matches, use steam_store_search for comparison, steam_find_similar for deterministic library overlap, and steam_link_generate for store links.',
+              '4. Use steam_export when the user wants a JSON or Markdown handoff of the shortlisted releases.',
+              '5. Explain results in deterministic terms such as release status, app type, store metadata, and how the shortlist was filtered by limit, types, or comingSoonOnly.',
+              '6. If steam_status or steam_release_scout reports that the Steam Web API key is unavailable, tell the user that steam_release_scout requires `STEAM_API_KEY` and stop instead of improvising with unofficial substitutes.'
             ].join('\n')
           }
         }]
