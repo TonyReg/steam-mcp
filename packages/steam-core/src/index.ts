@@ -5,6 +5,7 @@ export * from './discovery/index.js';
 export * from './links/index.js';
 export * from './deck/index.js';
 export * from './store/index.js';
+export * from './official-store/index.js';
 export * from './collections/types.js';
 export * from './collections/backend-registry/index.js';
 export * from './collections/backends/cloudstorage-json/index.js';

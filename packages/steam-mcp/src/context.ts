@@ -8,6 +8,7 @@ import {
   ExportService,
   LibraryService,
   LinkService,
+  OfficialStoreClient,
   RecommendService,
   SafetyService,
   SearchService,
@@ -22,6 +23,7 @@ export interface SteamMcpContext {
   discoveryService: SteamDiscoveryService;
   statusService: StatusService;
   storeClient: StoreClient;
+  officialStoreClient: OfficialStoreClient;
   deckStatusProvider: DeckStatusProvider;
   libraryService: LibraryService;
   collectionService: CollectionService;
@@ -46,6 +48,10 @@ export function createSteamMcpContext(env: NodeJS.ProcessEnv = process.env): Ste
     cacheDir: path.join(config.stateDirectories.metadataDir, 'store-appdetails'),
     cacheTtlMs: config.storeAppDetailsCacheTtlMs
   });
+  const officialStoreClient = new OfficialStoreClient({
+    steamWebApiKey: config.steamWebApiKey,
+    fetchImpl: fetch
+  });
 
   const backendRegistry = new CollectionBackendRegistry([], {
     'cloudstorage-json': (sourcePath, steamId) => new CloudStorageJsonCollectionBackend(sourcePath, steamId)
@@ -63,6 +69,7 @@ export function createSteamMcpContext(env: NodeJS.ProcessEnv = process.env): Ste
     discoveryService,
     statusService,
     storeClient,
+    officialStoreClient,
     deckStatusProvider,
     libraryService,
     collectionService,
