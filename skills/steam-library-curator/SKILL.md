@@ -11,12 +11,12 @@ Use this skill for library-first, read-heavy Steam workflows built on top of the
 
 - The user wants to analyze or organize their owned Steam library without mutating Steam-owned state.
 - The user wants deterministic recommendations based on genres, tags, favorites, collections, hidden flags, playtime, or Steam Deck status.
-- The user wants store enrichment or comparison after starting from the local library, plus JSON/Markdown export or `steam://` launch/store/library/community links.
+- The user wants store enrichment or comparison after starting from the owned library, plus JSON/Markdown export or `steam://` launch/store/library/community links.
 
 ## Workflow
 
 1. Start with the MCP prompt `steam_library_curator` when your client supports prompts.
-2. Call `steam_status` first and confirm the detected Steam user, collection backend, and whether collection writes are enabled.
+2. Call `steam_status` first and confirm the detected Steam user, whether `STEAM_API_KEY` is available for owned-library enumeration, the collection backend, and whether collection writes are enabled.
 3. Use `steam_library_list` or `steam_library_search` for the main analysis pass.
 4. Add `steam_find_similar` or `steam_store_search` only when you need deterministic comparison or store enrichment beyond the owned library.
 5. Use `steam_export` for JSON/Markdown handoff and `steam_link_generate` for actionable links.
@@ -24,6 +24,7 @@ Use this skill for library-first, read-heavy Steam workflows built on top of the
 ## Safety Rules
 
 - Stay read-only by default.
+- If `steam_status` reports that `STEAM_API_KEY` is unavailable, stop and tell the user the owned library cannot be enumerated until API-authoritative access is configured.
 - Keep the workflow library-first; unowned store games may appear only when enrichment or comparison is explicitly useful.
 - Do not switch to collection mutation unless the user explicitly asks to change Steam-owned state.
 - Explain recommendations in deterministic terms only: tags, genres, collections, favorites, hidden flags, playtime, and Deck status.

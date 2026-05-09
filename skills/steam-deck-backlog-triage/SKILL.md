@@ -16,7 +16,7 @@ Use this skill for Steam Deck-focused backlog analysis of the owned library buil
 ## Workflow
 
 1. Start with the MCP prompt `steam_deck_backlog_triage` when your client supports prompts.
-2. Call `steam_status` first to confirm the active Steam environment and backend state.
+2. Call `steam_status` first to confirm the active Steam environment, backend state, and whether `STEAM_API_KEY` is available for owned-library enumeration.
 3. Use `steam_library_search` with `played=false` and the relevant `deckStatuses` filter.
 4. Use `steam_find_similar` if you need deterministic ranking against known favorites or recent play patterns.
 5. Use `steam_export` for a shortlist and `steam_link_generate` for store/library/launch links.
@@ -24,6 +24,7 @@ Use this skill for Steam Deck-focused backlog analysis of the owned library buil
 ## Safety Rules
 
 - This workflow is read-only by default.
+- If `steam_status` reports that `STEAM_API_KEY` is unavailable, stop and tell the user the owned backlog cannot be enumerated until API-authoritative access is configured.
 - Keep the workflow focused on the owned backlog rather than general Steam store discovery.
 - Keep reasoning explicit and deterministic: Deck status, genres, tags, collections, favorites, hidden flags, and playtime.
 - Do not escalate to collection mutation unless the user separately asks for collection reorganization.
