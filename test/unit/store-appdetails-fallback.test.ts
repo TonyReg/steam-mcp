@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { OfficialStoreClient } from '../../packages/steam-core/src/official-store/index.js';
 import { createStoreAppDetailsFallbackFetch } from '../../packages/steam-mcp/src/store-appdetails-fallback.js';
 
 test('fallback calls GetOwnedGames with converted SteamID64 and returns synthetic appdetails payload', async () => {
@@ -24,9 +25,13 @@ test('fallback calls GetOwnedGames with converted SteamID64 and returns syntheti
     }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
   };
 
+  const officialStoreClient = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl
+  });
   const wrappedFetch = createStoreAppDetailsFallbackFetch({
     fetchImpl,
-    steamWebApiKey: 'test-key',
+    officialStoreClient,
     getSelectedUserId: async () => '935812139'
   });
 
@@ -41,31 +46,36 @@ test('fallback calls GetOwnedGames with converted SteamID64 and returns syntheti
   assert.equal(apiUrl.searchParams.get('steamid'), null);
   assert.equal(apiUrl.searchParams.get('include_appinfo'), null);
   assert.equal(apiUrl.searchParams.get('include_played_free_games'), null);
+  assert.equal(apiUrl.searchParams.get('include_free_sub'), null);
   assert.equal(apiUrl.searchParams.get('appids_filter[0]'), null);
   assert.equal(apiUrl.searchParams.get('format'), 'json');
-  assert.equal(
-    apiUrl.searchParams.get('input_json'),
-    '{"steamid":76561198896077867,"include_appinfo":true,"include_played_free_games":true,"appids_filter":[2051120]}'
-  );
+  assert.deepEqual(JSON.parse(apiUrl.searchParams.get('input_json') ?? '{}'), {
+    steamid: '76561198896077867',
+    include_appinfo: true,
+    include_played_free_games: true,
+    include_free_sub: true,
+    appids_filter: [2051120]
+  });
 });
 
 test('fallback preserves successful storefront payloads without calling the Web API', async () => {
   const requestedUrls: string[] = [];
-  const wrappedFetch = createStoreAppDetailsFallbackFetch({
-    fetchImpl: async (input) => {
-      const url = new URL(String(input));
-      requestedUrls.push(url.toString());
-      return new Response(JSON.stringify({
-        '620': {
-          success: true,
-          data: {
-            steam_appid: 620,
-            name: 'Portal 2'
-          }
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    requestedUrls.push(url.toString());
+    return new Response(JSON.stringify({
+      '620': {
+        success: true,
+        data: {
+          steam_appid: 620,
+          name: 'Portal 2'
         }
-      }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
-    },
-    steamWebApiKey: 'test-key',
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  };
+  const wrappedFetch = createStoreAppDetailsFallbackFetch({
+    fetchImpl,
+    officialStoreClient: new OfficialStoreClient({ steamWebApiKey: 'test-key', fetchImpl }),
     getSelectedUserId: async () => '76561198000000000'
   });
 
@@ -78,11 +88,13 @@ test('fallback preserves successful storefront payloads without calling the Web 
 
 test('fallback skips official Web API lookup when key or user is unavailable', async () => {
   const requestedUrls: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    requestedUrls.push(String(input));
+    return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
+  };
   const wrappedFetch = createStoreAppDetailsFallbackFetch({
-    fetchImpl: async (input) => {
-      requestedUrls.push(String(input));
-      return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
-    },
+    fetchImpl,
+    officialStoreClient: new OfficialStoreClient({ fetchImpl }),
     getSelectedUserId: async () => undefined
   });
 
@@ -94,17 +106,18 @@ test('fallback skips official Web API lookup when key or user is unavailable', a
 
 test('fallback preserves storefront failure when owned-game lookup returns no match', async () => {
   const requestedUrls: string[] = [];
-  const wrappedFetch = createStoreAppDetailsFallbackFetch({
-    fetchImpl: async (input) => {
-      const url = new URL(String(input));
-      requestedUrls.push(url.toString());
-      if (url.hostname === 'store.steampowered.com') {
-        return new Response('{}', { status: 403, headers: { 'content-type': 'application/json' } }) as Response;
-      }
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    requestedUrls.push(url.toString());
+    if (url.hostname === 'store.steampowered.com') {
+      return new Response('{}', { status: 403, headers: { 'content-type': 'application/json' } }) as Response;
+    }
 
-      return new Response('{"response":{"games":[]}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
-    },
-    steamWebApiKey: 'test-key',
+    return new Response('{"response":{"games":[]}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  };
+  const wrappedFetch = createStoreAppDetailsFallbackFetch({
+    fetchImpl,
+    officialStoreClient: new OfficialStoreClient({ steamWebApiKey: 'test-key', fetchImpl }),
     getSelectedUserId: async () => '76561198000000000'
   });
 
