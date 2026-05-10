@@ -302,6 +302,11 @@ export interface OfficialStoreItemSummary {
   releaseDate?: string;
   comingSoon?: boolean;
   freeToPlay?: boolean;
+  developers?: string[];
+  publishers?: string[];
+  shortDescription?: string;
+  headerImage?: string;
+  categoryIds?: number[];
   tagIds?: number[];
   storeUrl: string;
 }

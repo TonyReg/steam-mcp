@@ -66,7 +66,9 @@ export class OfficialStoreClient {
         data_request: {
           include_basic_info: true,
           include_release: true,
-          include_links: true
+          include_links: true,
+          include_assets: true,
+          include_tag_count: true
         }
       },
       'Steam Web API key is required for official store items access. Set STEAM_API_KEY.',
@@ -115,6 +117,7 @@ export class OfficialStoreClient {
           include_basic_info: true,
           include_release: true,
           include_links: true,
+          include_assets: true,
           include_tag_count: true
         }
       },
@@ -326,6 +329,85 @@ function normalizeOfficialStoreApp(payload: unknown): OfficialStoreAppSummary[] 
   } satisfies OfficialStoreAppSummary];
 }
 
+function readOfficialStoreNamedStrings(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const names = value.flatMap((entry) => {
+    if (typeof entry === 'string') {
+      const normalized = entry.trim();
+      return normalized === '' ? [] : [normalized];
+    }
+
+    if (!isRecord(entry) || typeof entry.name !== 'string') {
+      return [];
+    }
+
+    const normalized = entry.name.trim();
+    return normalized === '' ? [] : [normalized];
+  });
+
+  return names.length > 0 ? Array.from(new Set(names)) : undefined;
+}
+
+function readOfficialStoreNumberList(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const values = value.flatMap((entry) => {
+    const numberValue = toNumber(entry);
+    return numberValue ? [numberValue] : [];
+  });
+
+  return values.length > 0 ? Array.from(new Set(values)) : undefined;
+}
+
+function readOfficialStoreCategoryIds(value: unknown): number[] | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const categoryIds = Object.values(value).flatMap((entry) => readOfficialStoreNumberList(entry) ?? []);
+  return categoryIds.length > 0 ? Array.from(new Set(categoryIds)) : undefined;
+}
+
+function readOfficialStoreTagIds(payload: Record<string, unknown>): number[] | undefined {
+  const tagIds = [
+    ...(readOfficialStoreNumberList(payload.tagids) ?? []),
+    ...(readOfficialStoreNumberList(payload.tag_ids) ?? []),
+    ...(Array.isArray(payload.tags)
+      ? payload.tags.flatMap((entry) => {
+          const tagId = isRecord(entry) ? toNumber(entry.tagid) : undefined;
+          return tagId ? [tagId] : [];
+        })
+      : [])
+  ];
+
+  return tagIds.length > 0 ? Array.from(new Set(tagIds)) : undefined;
+}
+
+function resolveOfficialStoreAssetUrl(assets: unknown, assetKey: string): string | undefined {
+  if (!isRecord(assets)) {
+    return undefined;
+  }
+
+  const assetUrlFormat = typeof assets.asset_url_format === 'string' && assets.asset_url_format.trim() !== ''
+    ? assets.asset_url_format.trim()
+    : undefined;
+  const assetPath = typeof assets[assetKey] === 'string' && assets[assetKey].trim() !== ''
+    ? assets[assetKey].trim()
+    : undefined;
+
+  if (!assetUrlFormat || !assetPath) {
+    return undefined;
+  }
+
+  const relativePath = assetUrlFormat.replace('${FILENAME}', assetPath).replace(/^\/+/, '');
+  return new URL(relativePath, 'https://shared.steamstatic.com/store_item_assets/').toString();
+}
+
 function normalizeOfficialStoreItem(payload: unknown): OfficialStoreItemSummary[] {
   if (!isRecord(payload)) {
     return [];
@@ -344,6 +426,7 @@ function normalizeOfficialStoreItem(payload: unknown): OfficialStoreItemSummary[
           ? payload.type
           : undefined;
   const release = isRecord(payload.release) ? payload.release : undefined;
+  const basicInfo = isRecord(payload.basic_info) ? payload.basic_info : undefined;
   const storeUrlPath = typeof payload.store_url_path === 'string' && payload.store_url_path.trim() !== ''
     ? payload.store_url_path.trim()
     : undefined;
@@ -381,14 +464,14 @@ function normalizeOfficialStoreItem(payload: unknown): OfficialStoreItemSummary[
       : finalPriceInCents !== undefined && finalPriceInCents > 0
         ? false
         : undefined;
-
-  // Extract tag IDs from the response
-  const tagIds = Array.isArray(payload.tag_ids)
-    ? payload.tag_ids.flatMap((id) => {
-        const tagId = toNumber(id);
-        return tagId ? [tagId] : [];
-      })
+  const developers = readOfficialStoreNamedStrings(basicInfo?.developers);
+  const publishers = readOfficialStoreNamedStrings(basicInfo?.publishers);
+  const shortDescription = typeof basicInfo?.short_description === 'string' && basicInfo.short_description.trim() !== ''
+    ? basicInfo.short_description.trim()
     : undefined;
+  const headerImage = resolveOfficialStoreAssetUrl(payload.assets, 'header');
+  const categoryIds = readOfficialStoreCategoryIds(payload.categories);
+  const tagIds = readOfficialStoreTagIds(payload);
 
   return [{
     appId,
@@ -397,6 +480,11 @@ function normalizeOfficialStoreItem(payload: unknown): OfficialStoreItemSummary[
     releaseDate,
     comingSoon,
     ...(freeToPlay === undefined ? {} : { freeToPlay }),
+    ...(developers === undefined ? {} : { developers }),
+    ...(publishers === undefined ? {} : { publishers }),
+    ...(shortDescription === undefined ? {} : { shortDescription }),
+    ...(headerImage === undefined ? {} : { headerImage }),
+    ...(categoryIds === undefined ? {} : { categoryIds }),
     ...(tagIds === undefined || tagIds.length === 0 ? {} : { tagIds }),
     storeUrl
   } satisfies OfficialStoreItemSummary];

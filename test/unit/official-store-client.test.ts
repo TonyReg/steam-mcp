@@ -92,6 +92,20 @@ test('official store client calls GetItems with input_json request payload and n
               store_url_path: 'app/620/Portal_2',
               appid: 620,
               type: 0,
+              basic_info: {
+                short_description: 'The "Perpetual Testing Initiative" has been expanded to allow you to design co-op puzzles for you and your friends!',
+                developers: [{ name: 'Valve' }],
+                publishers: [{ name: 'Valve' }]
+              },
+              assets: {
+                asset_url_format: 'steam/apps/620/${FILENAME}?t=1745363004',
+                header: 'header.jpg'
+              },
+              categories: {
+                supported_player_categoryids: [2, 1],
+                feature_categoryids: [22, 29]
+              },
+              tagids: [4182, 1625],
               release: {
                 steam_release_date: 1303153200
               }
@@ -154,6 +168,12 @@ test('official store client calls GetItems with input_json request payload and n
         type: 'game',
         releaseDate: '2011-04-18T19:00:00.000Z',
         comingSoon: undefined,
+        developers: ['Valve'],
+        publishers: ['Valve'],
+        shortDescription: 'The "Perpetual Testing Initiative" has been expanded to allow you to design co-op puzzles for you and your friends!',
+        headerImage: 'https://shared.steamstatic.com/store_item_assets/steam/apps/620/header.jpg?t=1745363004',
+        categoryIds: [2, 1, 22, 29],
+        tagIds: [4182, 1625],
         storeUrl: 'https://store.steampowered.com/app/620/Portal_2'
       },
       {
@@ -197,9 +217,62 @@ test('official store client calls GetItems with input_json request payload and n
     data_request: {
       include_basic_info: true,
       include_release: true,
-      include_links: true
+      include_links: true,
+      include_assets: true,
+      include_tag_count: true
     }
   });
+});
+
+test('official store client preserves only proven richer metadata from GetItems payloads', async () => {
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async () => new Response(JSON.stringify({
+      response: {
+        store_items: [
+          {
+            item_type: 0,
+            id: 620,
+            success: 1,
+            visible: true,
+            name: 'Portal 2',
+            store_url_path: 'app/620/Portal_2',
+            appid: 620,
+            type: 0,
+            basic_info: {
+              short_description: 'A science-fair-grade portal experiment.',
+              developers: [{ name: 'Valve' }],
+              publishers: [{ name: 'Valve' }]
+            },
+            assets: {
+              asset_url_format: 'steam/apps/620/${FILENAME}?t=1745363004',
+              header: 'header.jpg'
+            },
+            categories: {
+              supported_player_categoryids: [2, 1]
+            },
+            tags: [{ tagid: 4182, weight: 602 }],
+            release: {
+              steam_release_date: 1303153200
+            }
+          }
+        ]
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response
+  });
+
+  const result = await client.getItems({ appIds: [620] });
+  const item = result.items[0];
+
+  assert.deepEqual(item?.developers, ['Valve']);
+  assert.deepEqual(item?.publishers, ['Valve']);
+  assert.equal(item?.shortDescription, 'A science-fair-grade portal experiment.');
+  assert.equal(item?.headerImage, 'https://shared.steamstatic.com/store_item_assets/steam/apps/620/header.jpg?t=1745363004');
+  assert.deepEqual(item?.categoryIds, [2, 1]);
+  assert.deepEqual(item?.tagIds, [4182]);
+  assert.equal('genres' in (item ?? {}), false);
+  assert.equal('categories' in (item ?? {}), false);
+  assert.equal('tags' in (item ?? {}), false);
 });
 
 test('official store client rejects GetItems calls when no API key is configured', async () => {
@@ -243,6 +316,20 @@ test('official store client calls Query with input_json request payload and norm
               appid: 901553,
               type: 0,
               is_free: true,
+              basic_info: {
+                short_description: 'A classic shooter bundle returns with updated visuals.',
+                developers: [{ name: 'Croteam' }],
+                publishers: [{ name: 'Devolver Digital' }]
+              },
+              assets: {
+                asset_url_format: 'steam/apps/901553/${FILENAME}?t=1730000000',
+                header: 'header.jpg'
+              },
+              categories: {
+                feature_categoryids: [22],
+                supported_player_categoryids: [2]
+              },
+              tagids: [1774, 3810],
               release: {
                 is_coming_soon: true,
                 custom_release_date_message: 'Coming soon'
@@ -270,6 +357,12 @@ test('official store client calls Query with input_json request payload and norm
         releaseDate: 'Coming soon',
         comingSoon: true,
         freeToPlay: true,
+        developers: ['Croteam'],
+        publishers: ['Devolver Digital'],
+        shortDescription: 'A classic shooter bundle returns with updated visuals.',
+        headerImage: 'https://shared.steamstatic.com/store_item_assets/steam/apps/901553/header.jpg?t=1730000000',
+        categoryIds: [22, 2],
+        tagIds: [1774, 3810],
         storeUrl: 'https://store.steampowered.com/app/901553/Serious_Sam_HD_Gold_Edition'
       }
     ]
@@ -303,6 +396,7 @@ test('official store client calls Query with input_json request payload and norm
       include_basic_info: true,
       include_release: true,
       include_links: true,
+      include_assets: true,
       include_tag_count: true
     }
   });
