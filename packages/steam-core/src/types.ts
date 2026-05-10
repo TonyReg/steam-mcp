@@ -290,6 +290,9 @@ export interface OfficialStoreQueryItemsOptions {
   countryCode?: string;
   comingSoonOnly?: boolean;
   freeToPlay?: boolean;
+  tagIdsMustMatch?: number[];
+  tagIds?: number[];
+  tagIdsExclude?: number[];
 }
 
 export interface OfficialStoreItemSummary {
@@ -299,6 +302,7 @@ export interface OfficialStoreItemSummary {
   releaseDate?: string;
   comingSoon?: boolean;
   freeToPlay?: boolean;
+  tagIds?: number[];
   storeUrl: string;
 }
 
