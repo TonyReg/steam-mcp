@@ -267,6 +267,49 @@ export interface StoreAppDetails {
   storeUrl: string;
 }
 
+export interface OfficialStoreTopReleasesPage {
+  pageId: number;
+  pageName?: string;
+  appIds: number[];
+}
+
+export interface OfficialStoreTopReleasesPagesResult {
+  pages: OfficialStoreTopReleasesPage[];
+}
+
+export interface OfficialStoreItemsOptions {
+  appIds: number[];
+  language?: string;
+  countryCode?: string;
+}
+
+export interface OfficialStoreQueryItemsOptions {
+  limit?: number;
+  types?: Array<'game' | 'software' | 'dlc'>;
+  language?: string;
+  countryCode?: string;
+  comingSoonOnly?: boolean;
+  freeToPlay?: boolean;
+}
+
+export interface OfficialStoreItemSummary {
+  appId: number;
+  name: string;
+  type?: 'game' | 'software' | 'dlc';
+  releaseDate?: string;
+  comingSoon?: boolean;
+  freeToPlay?: boolean;
+  storeUrl: string;
+}
+
+export interface OfficialStoreItemsResult {
+  items: OfficialStoreItemSummary[];
+}
+
+export interface OfficialStoreQueryItemsResult {
+  items: OfficialStoreItemSummary[];
+}
+
 export interface OfficialStoreAppSummary {
   appId: number;
   name: string;
@@ -333,5 +376,9 @@ export interface SteamReleaseScoutResult {
   type: 'game' | 'software' | 'dlc';
   releaseDate?: string;
   comingSoon: boolean;
+  freeToPlay?: boolean;
+  source: 'query' | 'charts';
+  ordering: 'query' | 'charts';
+  filtersApplied: string[];
   storeUrl: string;
 }
