@@ -19,6 +19,12 @@ const steamReleaseScoutInputShape = {
 const steamReleaseScoutArgsSchema = z.object(steamReleaseScoutInputShape);
 const steamReleaseScoutInputSchema: Record<string, z.ZodTypeAny> = steamReleaseScoutInputShape;
 
+const UPCOMING_QUERY_OVERFETCH_MULTIPLIER = 3;
+
+function getUpcomingQueryCandidateLimit(limit: number): number {
+  return Math.min(100, Math.max(limit, limit * UPCOMING_QUERY_OVERFETCH_MULTIPLIER));
+}
+
 export function registerSteamReleaseScoutTool(server: McpServer, context: SteamMcpContext): void {
   registerToolShallow(
     server,
@@ -53,8 +59,9 @@ export function registerSteamReleaseScoutTool(server: McpServer, context: SteamM
         let orderedAppIds: number[];
 
         if (comingSoonOnly) {
+          const queryLimit = getUpcomingQueryCandidateLimit(limit);
           itemsResult = await context.officialStoreClient.queryItems({
-            limit,
+            limit: queryLimit,
             types,
             comingSoonOnly: true,
             ...(freeToPlay === undefined ? {} : { freeToPlay }),

@@ -68,7 +68,18 @@ function createContext(options: {
           throw options.queryItemsError;
         }
 
-        return options.queryItemsResult ?? { items: [] };
+        const result = options.queryItemsResult ?? { items: [] };
+        const limit = typeof request === 'object' && request !== null
+          ? Reflect.get(request, 'limit')
+          : undefined;
+
+        if (typeof limit !== 'number') {
+          return result;
+        }
+
+        return {
+          items: result.items.slice(0, limit)
+        };
       },
       getAppList: async () => {
         calls.getAppList += 1;
@@ -160,7 +171,7 @@ test('steam release scout returns upcoming releases from the query-backed offici
   ]);
   assert.equal(harness.calls.getTopReleasesPages, 0);
   assert.deepEqual(harness.calls.getItems, []);
-  assert.deepEqual(harness.calls.queryItems, [{ limit: 1, types: ['game', 'dlc'], comingSoonOnly: true }]);
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 3, types: ['game', 'dlc'], comingSoonOnly: true }]);
   assert.equal(harness.calls.getAppList, 0);
   assert.deepEqual(harness.calls.getAppDetails, []);
 });
@@ -207,7 +218,200 @@ test('steam release scout applies freeToPlay on the query-backed upcoming path a
       storeUrl: 'https://store.steampowered.com/app/50/'
     }
   ]);
-  assert.deepEqual(harness.calls.queryItems, [{ limit: 5, types: ['game'], comingSoonOnly: true, freeToPlay: true }]);
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 15, types: ['game'], comingSoonOnly: true, freeToPlay: true }]);
+});
+
+test('steam release scout overfetches upcoming query candidates before final trimming', async () => {
+  const harness = createContext({
+    queryItemsResult: {
+      items: [
+        {
+          appId: 70,
+          name: 'Released Noise',
+          type: 'game',
+          releaseDate: 'Jan 1, 2024',
+          comingSoon: false,
+          freeToPlay: false,
+          storeUrl: 'https://store.steampowered.com/app/70/'
+        },
+        {
+          appId: 71,
+          name: 'First Future Game',
+          type: 'game',
+          releaseDate: 'Coming soon',
+          comingSoon: true,
+          freeToPlay: false,
+          storeUrl: 'https://store.steampowered.com/app/71/'
+        },
+        {
+          appId: 72,
+          name: 'Second Future Game',
+          type: 'game',
+          releaseDate: 'Q4 2026',
+          comingSoon: true,
+          freeToPlay: false,
+          storeUrl: 'https://store.steampowered.com/app/72/'
+        }
+      ]
+    }
+  });
+
+  const result = await harness.invoke({ limit: 2, types: ['game'] });
+
+  assert.deepEqual(parseFirstTextContent(result), [
+    {
+      appId: 71,
+      name: 'First Future Game',
+      type: 'game',
+      releaseDate: 'Coming soon',
+      comingSoon: true,
+      freeToPlay: false,
+      source: 'query',
+      ordering: 'query',
+      filtersApplied: ['types:game', 'comingSoonOnly:true'],
+      storeUrl: 'https://store.steampowered.com/app/71/'
+    },
+    {
+      appId: 72,
+      name: 'Second Future Game',
+      type: 'game',
+      releaseDate: 'Q4 2026',
+      comingSoon: true,
+      freeToPlay: false,
+      source: 'query',
+      ordering: 'query',
+      filtersApplied: ['types:game', 'comingSoonOnly:true'],
+      storeUrl: 'https://store.steampowered.com/app/72/'
+    }
+  ]);
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 6, types: ['game'], comingSoonOnly: true }]);
+});
+
+test('steam release scout can still fill the requested upcoming limit after authoritative facet filtering removes early candidates', async () => {
+  const appDetailsMap = new Map<number, StoreAppDetails | undefined>([
+    [80, { appId: 80, name: 'Future Shooter', type: 'game', genres: ['Action'], categories: ['Single-player'], tags: ['Shooter'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/80/' }],
+    [81, { appId: 81, name: 'Future Puzzle', type: 'game', genres: ['Puzzle'], categories: ['Single-player'], tags: ['Puzzle'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/81/' }],
+    [82, { appId: 82, name: 'Future RPG One', type: 'game', genres: ['RPG'], categories: ['Single-player'], tags: ['RPG'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/82/' }],
+    [83, { appId: 83, name: 'Future RPG Two', type: 'game', genres: ['RPG'], categories: ['Co-op'], tags: ['RPG'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/83/' }]
+  ]);
+
+  const harness = createContext({
+    queryItemsResult: {
+      items: [
+        { appId: 80, name: 'Future Shooter', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/80/' },
+        { appId: 81, name: 'Future Puzzle', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/81/' },
+        { appId: 82, name: 'Future RPG One', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/82/' },
+        { appId: 83, name: 'Future RPG Two', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/83/' }
+      ]
+    },
+    appDetailsMap
+  });
+
+  const result = await harness.invoke({ limit: 2, types: ['game'], tags: ['RPG'] });
+
+  assert.deepEqual(parseFirstTextContent(result), [
+    {
+      appId: 82,
+      name: 'Future RPG One',
+      type: 'game',
+      releaseDate: 'Coming soon',
+      comingSoon: true,
+      freeToPlay: false,
+      source: 'query',
+      ordering: 'query',
+      filtersApplied: ['types:game', 'comingSoonOnly:true', 'tags:rpg'],
+      storeUrl: 'https://store.steampowered.com/app/82/'
+    },
+    {
+      appId: 83,
+      name: 'Future RPG Two',
+      type: 'game',
+      releaseDate: 'Coming soon',
+      comingSoon: true,
+      freeToPlay: false,
+      source: 'query',
+      ordering: 'query',
+      filtersApplied: ['types:game', 'comingSoonOnly:true', 'tags:rpg'],
+      storeUrl: 'https://store.steampowered.com/app/83/'
+    }
+  ]);
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 6, types: ['game'], comingSoonOnly: true }]);
+  assert.deepEqual(harness.calls.getAppDetails, [80, 81, 82, 83]);
+});
+
+test('steam release scout preserves query ordering while using the larger upcoming candidate window', async () => {
+  const harness = createContext({
+    queryItemsResult: {
+      items: [
+        {
+          appId: 90,
+          name: 'Future Tool',
+          type: 'software',
+          releaseDate: 'Coming soon',
+          comingSoon: true,
+          freeToPlay: false,
+          storeUrl: 'https://store.steampowered.com/app/90/'
+        },
+        {
+          appId: 91,
+          name: 'First Future Game',
+          type: 'game',
+          releaseDate: 'Coming soon',
+          comingSoon: true,
+          freeToPlay: false,
+          storeUrl: 'https://store.steampowered.com/app/91/'
+        },
+        {
+          appId: 92,
+          name: 'Second Future Game',
+          type: 'game',
+          releaseDate: 'Coming soon',
+          comingSoon: true,
+          freeToPlay: false,
+          storeUrl: 'https://store.steampowered.com/app/92/'
+        },
+        {
+          appId: 93,
+          name: 'Third Future Game',
+          type: 'game',
+          releaseDate: 'Coming soon',
+          comingSoon: true,
+          freeToPlay: false,
+          storeUrl: 'https://store.steampowered.com/app/93/'
+        }
+      ]
+    }
+  });
+
+  const result = await harness.invoke({ limit: 2, types: ['game'] });
+
+  assert.deepEqual(parseFirstTextContent(result), [
+    {
+      appId: 91,
+      name: 'First Future Game',
+      type: 'game',
+      releaseDate: 'Coming soon',
+      comingSoon: true,
+      freeToPlay: false,
+      source: 'query',
+      ordering: 'query',
+      filtersApplied: ['types:game', 'comingSoonOnly:true'],
+      storeUrl: 'https://store.steampowered.com/app/91/'
+    },
+    {
+      appId: 92,
+      name: 'Second Future Game',
+      type: 'game',
+      releaseDate: 'Coming soon',
+      comingSoon: true,
+      freeToPlay: false,
+      source: 'query',
+      ordering: 'query',
+      filtersApplied: ['types:game', 'comingSoonOnly:true'],
+      storeUrl: 'https://store.steampowered.com/app/92/'
+    }
+  ]);
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 6, types: ['game'], comingSoonOnly: true }]);
 });
 
 test('steam release scout can include released apps when comingSoonOnly is false', async () => {
@@ -448,7 +652,7 @@ test('steam release scout reports explicit missing-key failures for the default 
   assert.equal(harness.calls.getAppList, 0);
   assert.equal(harness.calls.getTopReleasesPages, 0);
   assert.deepEqual(harness.calls.getItems, []);
-  assert.deepEqual(harness.calls.queryItems, [{ limit: 5, types: ['game', 'software', 'dlc'], comingSoonOnly: true }]);
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 15, types: ['game', 'software', 'dlc'], comingSoonOnly: true }]);
 });
 
 test('steam release scout reports explicit missing-key failures for the released path too', async () => {
