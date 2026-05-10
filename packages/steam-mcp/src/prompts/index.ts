@@ -28,7 +28,8 @@ type SteamReleaseScoutPromptType = z.infer<typeof steamReleaseScoutPromptTypeSch
 const steamReleaseScoutPromptArgs = {
   limit: z.string().optional().describe('Optional integer result limit as a string, for example "20".'),
   types: z.string().optional().describe('Optional comma-separated release types string, for example "game,dlc".'),
-  comingSoonOnly: z.string().optional().describe('Optional boolean string: "true" or "false".')
+  comingSoonOnly: z.string().optional().describe('Optional boolean string: "true" or "false".'),
+  freeToPlay: z.string().optional().describe('Optional boolean string: "true" or "false" to require free-to-play or non-free results.')
 };
 const steamReleaseScoutPromptSchema = z.object(steamReleaseScoutPromptArgs);
 
@@ -57,6 +58,16 @@ function parseSteamReleaseScoutPromptTypes(rawTypes: string | undefined): SteamR
 
 function parseSteamReleaseScoutPromptComingSoonOnly(rawComingSoonOnly: string | undefined): boolean | undefined {
   const trimmed = rawComingSoonOnly?.trim().toLowerCase();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return z.enum(['true', 'false']).transform((value) => value === 'true').parse(trimmed);
+}
+
+
+function parseSteamReleaseScoutPromptFreeToPlay(rawFreeToPlay: string | undefined): boolean | undefined {
+  const trimmed = rawFreeToPlay?.trim().toLowerCase();
   if (!trimmed) {
     return undefined;
   }
@@ -184,9 +195,10 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
       const limit = parseSteamReleaseScoutPromptLimit(parsedArgs.limit);
       const types = parseSteamReleaseScoutPromptTypes(parsedArgs.types);
       const comingSoonOnly = parseSteamReleaseScoutPromptComingSoonOnly(parsedArgs.comingSoonOnly);
+      const freeToPlay = parseSteamReleaseScoutPromptFreeToPlay(parsedArgs.freeToPlay);
       const selectedTypes = types?.length ? types.join(', ') : 'game, software, dlc';
       return {
-        description: 'Read-only workflow for scouting official Steam catalog releases using authenticated catalog access plus public appdetails enrichment.',
+        description: 'Read-only workflow for scouting official Steam releases using authenticated official feeds plus official store metadata.',
         messages: [{
           role: 'user',
           content: {
@@ -196,13 +208,15 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               `Requested result limit: ${limit ?? 20}.`,
               `Requested release types: ${selectedTypes}.`,
               `Coming soon only: ${comingSoonOnly ?? true}.`,
+              freeToPlay === undefined ? 'Free to play filter: none.' : `Free to play filter: ${freeToPlay}.`,
               'Workflow:',
               '1. Call steam_status first and confirm the detected Steam user and whether the Steam Web API key is available in MCP runtime.',
               '2. Use steam_release_scout for the primary scouting pass. Keep the workflow read-only and do not fall back to any write path.',
-              '3. If the user wants deeper context on matches, use steam_store_search for comparison, steam_find_similar for deterministic library overlap, and steam_link_generate for store links.',
-              '4. Use steam_export when the user wants a JSON or Markdown handoff of the shortlisted releases.',
-              '5. Explain results in deterministic terms such as release status, app type, store metadata, and how the shortlist was filtered by limit, types, or comingSoonOnly.',
-              '6. If steam_status or steam_release_scout reports that the Steam Web API key is unavailable, tell the user that steam_release_scout requires `STEAM_API_KEY` and stop instead of improvising with unofficial substitutes.'
+              '3. When useful, pass freeToPlay=true or freeToPlay=false to narrow the official scout with the same boolean semantics used elsewhere in the MCP.',
+              '4. If the user wants deeper context on matches, use steam_store_search for comparison, steam_find_similar for deterministic library overlap, and steam_link_generate for store links.',
+              '5. Use steam_export when the user wants a JSON or Markdown handoff of the shortlisted releases.',
+              '6. Explain results in deterministic terms such as release status, app type, free-to-play state, store metadata, and how the shortlist was filtered by limit, types, comingSoonOnly, or freeToPlay.',
+              '7. If steam_status or steam_release_scout reports that the Steam Web API key is unavailable, tell the user that steam_release_scout requires `STEAM_API_KEY` and stop instead of improvising with unofficial substitutes.'
             ].join('\n')
           }
         }]

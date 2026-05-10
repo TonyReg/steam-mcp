@@ -9,7 +9,8 @@ const steamReleaseScoutTypeSchema = z.enum(['game', 'software', 'dlc']);
 const steamReleaseScoutInputShape = {
   limit: z.number().int().min(1).max(100).optional(),
   types: z.array(steamReleaseScoutTypeSchema).optional(),
-  comingSoonOnly: z.boolean().optional()
+  comingSoonOnly: z.boolean().optional(),
+  freeToPlay: z.boolean().optional()
 };
 
 const steamReleaseScoutArgsSchema = z.object(steamReleaseScoutInputShape);
@@ -21,63 +22,93 @@ export function registerSteamReleaseScoutTool(server: McpServer, context: SteamM
     'steam_release_scout',
     {
       title: 'Steam release scout',
-      description: 'Scout official Steam catalog apps and enrich them with public release metadata. Read-only and Steam Web API key dependent.',
+      description: 'Scout official Steam release feeds and enrich them with official store metadata. Read-only and Steam Web API key dependent.',
       inputSchema: steamReleaseScoutInputSchema
     },
     async (rawArgs) => {
       const args = steamReleaseScoutArgsSchema.parse(rawArgs);
       const limit = args.limit ?? 20;
-      const types = new Set(args.types ?? ['game', 'software', 'dlc']);
+      const types = args.types ?? ['game', 'software', 'dlc'];
+      const typeSet = new Set(types);
       const comingSoonOnly = args.comingSoonOnly ?? true;
-      const pageSize = Math.min(Math.max(limit, 50), 200);
-      const maxPages = 5;
-      const includeGames = types.has('game');
-      const includeDlc = types.has('dlc');
-      const includeSoftware = types.has('software');
+      const freeToPlay = args.freeToPlay;
 
       try {
-        const results: SteamReleaseScoutResult[] = [];
-        let lastAppId: number | undefined;
+        let itemsResult;
+        let orderedAppIds: number[];
 
-        for (let page = 0; page < maxPages && results.length < limit; page += 1) {
-          const appListRequest = {
-            limit: pageSize,
-            includeGames,
-            includeDlc,
-            includeSoftware,
-            ...(lastAppId === undefined ? {} : { lastAppId })
-          };
-          const appList = await context.officialStoreClient.getAppList(appListRequest);
+        if (comingSoonOnly) {
+          itemsResult = await context.officialStoreClient.queryItems({
+            limit,
+            types,
+            comingSoonOnly: true,
+            ...(freeToPlay === undefined ? {} : { freeToPlay })
+          });
+          orderedAppIds = itemsResult.items.map((item) => item.appId);
+        } else {
+          const topReleases = await context.officialStoreClient.getTopReleasesPages();
+          orderedAppIds = [];
+          const seenAppIds = new Set<number>();
 
-          for (const app of appList.apps) {
-            const details = await context.storeClient.getAppDetails(app.appId);
-            if (!details?.type || !types.has(details.type)) {
-              continue;
-            }
+          for (const page of topReleases.pages) {
+            for (const appId of page.appIds) {
+              if (seenAppIds.has(appId)) {
+                continue;
+              }
 
-            if (comingSoonOnly && details.comingSoon !== true) {
-              continue;
-            }
-
-            results.push({
-              appId: details.appId,
-              name: details.name,
-              type: details.type,
-              releaseDate: details.releaseDate,
-              comingSoon: details.comingSoon ?? false,
-              storeUrl: details.storeUrl
-            });
-
-            if (results.length >= limit) {
-              break;
+              seenAppIds.add(appId);
+              orderedAppIds.push(appId);
             }
           }
 
-          if (!appList.haveMoreResults || appList.lastAppId === undefined || appList.lastAppId === lastAppId || appList.apps.length === 0) {
+          if (orderedAppIds.length === 0) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify([], null, 2) }]
+            };
+          }
+
+          itemsResult = await context.officialStoreClient.getItems({ appIds: orderedAppIds });
+        }
+
+        const itemsByAppId = new Map(itemsResult.items.map((item) => [item.appId, item]));
+        const results: SteamReleaseScoutResult[] = [];
+        const filtersApplied = [
+          `types:${types.join(',')}`,
+          `comingSoonOnly:${String(comingSoonOnly)}`,
+          freeToPlay === undefined ? null : `freeToPlay:${String(freeToPlay)}`
+        ].filter((value): value is string => value !== null);
+        const source = comingSoonOnly ? 'query' : 'charts';
+
+        for (const appId of orderedAppIds) {
+          const item = itemsByAppId.get(appId);
+          if (!item?.type || !typeSet.has(item.type)) {
+            continue;
+          }
+
+          if (comingSoonOnly && item.comingSoon !== true) {
+            continue;
+          }
+
+          if (freeToPlay !== undefined && item.freeToPlay !== freeToPlay) {
+            continue;
+          }
+
+          results.push({
+            appId: item.appId,
+            name: item.name,
+            type: item.type,
+            releaseDate: item.releaseDate,
+            comingSoon: item.comingSoon ?? false,
+            ...(item.freeToPlay === undefined ? {} : { freeToPlay: item.freeToPlay }),
+            source,
+            ordering: source,
+            filtersApplied,
+            storeUrl: item.storeUrl
+          });
+
+          if (results.length >= limit) {
             break;
           }
-
-          lastAppId = appList.lastAppId;
         }
 
         return {
