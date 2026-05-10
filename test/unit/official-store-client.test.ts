@@ -594,6 +594,76 @@ test('official store client calls GetOwnedGames with input_json-only steamid and
   });
 });
 
+test('official store client calls PrioritizeAppsForUser with input_json request payload and normalizes app-only results', async () => {
+  const requestedUrls: string[] = [];
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      requestedUrls.push(url.toString());
+      return new Response(JSON.stringify({
+        response: {
+          ids: [
+            { appid: 620 },
+            { packageid: 1234 },
+            { appid: 730 },
+            { bundleid: 88 }
+          ]
+        }
+      }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }
+  });
+
+  const result = await client.prioritizeAppsForUser({
+    appIds: [620, 730],
+    steamId: '76561198000000000',
+    countryCode: 'US',
+    includeOwnedGames: true
+  });
+
+  assert.deepEqual(result, {
+    apps: [
+      { appId: 620 },
+      { appId: 730 }
+    ]
+  });
+
+  const requestUrl = new URL(requestedUrls[0] ?? '');
+  assert.equal(requestUrl.toString().startsWith('https://api.steampowered.com/IStoreAppSimilarityService/PrioritizeAppsForUser/v1/'), true);
+  assert.equal(requestUrl.searchParams.get('key'), 'test-key');
+  assert.equal(requestUrl.searchParams.get('format'), 'json');
+  assert.equal(requestUrl.searchParams.get('steamid'), null);
+  assert.equal(requestUrl.searchParams.get('country_code'), null);
+  assert.equal(requestUrl.searchParams.get('include_owned_games'), null);
+
+  const inputJson = JSON.parse(requestUrl.searchParams.get('input_json') ?? '{}') as Record<string, unknown>;
+  assert.deepEqual(inputJson, {
+    ids: [{ appid: 620 }, { appid: 730 }],
+    steamid: '76561198000000000',
+    country_code: 'US',
+    include_owned_games: true
+  });
+});
+
+test('official store client rejects similarity calls when no API key is configured', async () => {
+  const client = new OfficialStoreClient({
+    fetchImpl: async () => {
+      throw new Error('fetch should not run');
+    }
+  });
+
+  await assert.rejects(() => client.prioritizeAppsForUser({ appIds: [620] }), /STEAM_API_KEY/);
+});
+
+test('official store client surfaces non-ok HTTP failures for similarity requests', async () => {
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async () => new Response('upstream failure', { status: 502 })
+  });
+
+  await assert.rejects(() => client.prioritizeAppsForUser({ appIds: [620] }), /Official store similarity request failed with status 502\./);
+});
+
 test('official store client rejects owned-games calls when no API key is configured', async () => {
   const client = new OfficialStoreClient({
     fetchImpl: async () => {

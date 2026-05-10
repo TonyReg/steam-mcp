@@ -11,6 +11,9 @@ import type {
   OfficialStoreItemsOptions,
   OfficialStoreItemsResult,
   OfficialStoreItemSummary,
+  OfficialStorePrioritizeAppsOptions,
+  OfficialStorePrioritizeAppsResult,
+  OfficialStorePrioritizedAppSummary,
   OfficialStoreQueryItemsOptions,
   OfficialStoreQueryItemsResult,
   OfficialStoreTopReleasesPage,
@@ -158,6 +161,21 @@ export class OfficialStoreClient {
       'Official owned-games request failed'
     );
     return normalizeOfficialOwnedGames(response);
+  }
+
+  async prioritizeAppsForUser(request: OfficialStorePrioritizeAppsOptions): Promise<OfficialStorePrioritizeAppsResult> {
+    const response = await this.fetchServiceInterfaceJson(
+      'https://api.steampowered.com/IStoreAppSimilarityService/PrioritizeAppsForUser/v1/',
+      {
+        ids: request.appIds.map((appId) => ({ appid: appId })),
+        steamid: request.steamId,
+        country_code: request.countryCode,
+        include_owned_games: request.includeOwnedGames
+      },
+      'Steam Web API key is required for official store similarity access. Set STEAM_API_KEY.',
+      'Official store similarity request failed'
+    );
+    return normalizeOfficialStorePrioritizeApps(response);
   }
 
   async getRecentlyPlayedGames(request: OfficialRecentlyPlayedGamesOptions): Promise<OfficialRecentlyPlayedGamesResult> {
@@ -488,6 +506,32 @@ function normalizeOfficialStoreItem(payload: unknown): OfficialStoreItemSummary[
     ...(tagIds === undefined || tagIds.length === 0 ? {} : { tagIds }),
     storeUrl
   } satisfies OfficialStoreItemSummary];
+}
+
+function normalizeOfficialStorePrioritizeApps(payload: unknown): OfficialStorePrioritizeAppsResult {
+  if (!isRecord(payload) || !isRecord(payload.response)) {
+    return { apps: [] };
+  }
+
+  const response = payload.response;
+  const apps = Array.isArray(response.ids)
+    ? response.ids.flatMap((entry) => normalizeOfficialStorePrioritizedApp(entry))
+    : [];
+
+  return { apps };
+}
+
+function normalizeOfficialStorePrioritizedApp(payload: unknown): OfficialStorePrioritizedAppSummary[] {
+  if (!isRecord(payload)) {
+    return [];
+  }
+
+  const appId = toNumber(payload.appid);
+  if (!appId) {
+    return [];
+  }
+
+  return [{ appId } satisfies OfficialStorePrioritizedAppSummary];
 }
 
 function normalizeOfficialOwnedGame(payload: unknown): OfficialOwnedGameSummary[] {
