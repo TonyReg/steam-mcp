@@ -746,8 +746,6 @@ test('steam release scout reports explicit missing-key failures for the released
   assert.deepEqual(harness.calls.queryItems, []);
 });
 
-// Phase 1c: authoritative human-readable facet filtering tests
-
 test('steam release scout filters upcoming path by human-readable tags via getCacheableAppDetails', async () => {
   const appDetailsMap = new Map<number, StoreAppDetails | undefined>([
     [10, { appId: 10, name: 'Future RPG', type: 'game', genres: ['RPG'], categories: ['Single-player'], tags: ['RPG', 'Fantasy'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/10/' }],

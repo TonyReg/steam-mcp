@@ -118,7 +118,7 @@ export function registerSteamReleaseScoutTool(server: McpServer, context: SteamM
             continue;
           }
 
-          // Authoritative facet filtering via getCacheableAppDetails (Workstream B)
+          // Authoritative facet filtering via cacheable appdetails.
           // Only triggered when genres, categories, or tags facet filters are requested.
           if (requiresAuthoritativeFacetFiltering) {
             let details: StoreAppDetails | undefined;
