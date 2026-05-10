@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { GameRecord, SearchMatch, StoreSearchCandidate } from '@steam-mcp/steam-core';
+import type { GameRecord, SearchMatch, StoreAppDetails, StoreSearchCandidate } from '@steam-mcp/steam-core';
 import type { SteamMcpContext } from '../../packages/steam-mcp/src/context.js';
 import { registerSteamFindSimilarTool } from '../../packages/steam-mcp/src/tools/steam-find-similar.js';
 
@@ -43,12 +43,14 @@ function createToolHarness(options: {
   searchMatches?: SearchMatch<GameRecord>[];
   storeCandidates?: StoreSearchCandidate[];
   storeMatches?: SearchMatch<StoreSearchCandidate>[];
+  cacheableAppDetailsById?: Map<number, StoreAppDetails | undefined>;
 }) {
   const calls = {
     searchLibrary: [] as Array<unknown>,
     rankSimilarLibraryGames: [] as Array<unknown>,
     storeSearch: [] as Array<unknown>,
-    rankSimilarStoreCandidates: [] as Array<{ seedAppIds: number[]; candidateAppIds: number[] }>
+    getCacheableAppDetails: [] as number[],
+    rankSimilarStoreCandidates: [] as Array<{ seedAppIds: number[]; candidateAppIds: number[]; candidates: StoreSearchCandidate[] }>
   };
 
   const context = {
@@ -68,7 +70,8 @@ function createToolHarness(options: {
       rankSimilarStoreCandidates: (seedGames: GameRecord[], candidates: StoreSearchCandidate[]) => {
         calls.rankSimilarStoreCandidates.push({
           seedAppIds: seedGames.map((game) => game.appId),
-          candidateAppIds: candidates.map((candidate) => candidate.appId)
+          candidateAppIds: candidates.map((candidate) => candidate.appId),
+          candidates
         });
         return options.storeMatches ?? [];
       }
@@ -83,6 +86,10 @@ function createToolHarness(options: {
       search: async (request: unknown) => {
         calls.storeSearch.push(request);
         return options.storeCandidates ?? [];
+      },
+      getCacheableAppDetails: async (appId: number) => {
+        calls.getCacheableAppDetails.push(appId);
+        return options.cacheableAppDetailsById?.get(appId);
       }
     }
   } as unknown as SteamMcpContext;
@@ -104,6 +111,139 @@ function createToolHarness(options: {
     invoke: (rawArgs: unknown) => handler(rawArgs)
   };
 }
+
+test('steam find similar enriches store candidates with strict cacheable appdetails before ranking', async () => {
+  const harness = createToolHarness({
+    games: [
+      {
+        appId: 620,
+        name: 'Portal 2',
+        genres: ['Puzzle'],
+        tags: ['Co-op'],
+        developers: ['Valve'],
+        publishers: ['Valve']
+      }
+    ],
+    storeCandidates: [
+      {
+        appId: 3,
+        name: 'The Talos Principle',
+        storeUrl: 'https://store.steampowered.com/app/257510',
+        developers: [],
+        publishers: [],
+        genres: [],
+        tags: []
+      },
+      {
+        appId: 4,
+        name: 'Unenriched Candidate',
+        storeUrl: 'https://store.steampowered.com/app/4/'
+      }
+    ],
+    cacheableAppDetailsById: new Map<number, StoreAppDetails | undefined>([
+      [3, {
+        appId: 3,
+        name: 'The Talos Principle',
+        developers: ['Croteam'],
+        publishers: ['Devolver Digital'],
+        genres: ['Puzzle'],
+        categories: ['Single-player'],
+        tags: ['Puzzle', 'Philosophical'],
+        headerImage: 'https://cdn.example/talos.jpg',
+        storeUrl: 'https://store.steampowered.com/app/257510/'
+      }],
+      [4, undefined]
+    ])
+  });
+
+  const result = await harness.invoke({
+    seedAppIds: [620],
+    query: 'Portal 2',
+    scope: 'store',
+    limit: 10
+  });
+
+  assert.deepEqual(parseFirstTextContent(result), []);
+  assert.deepEqual(harness.calls.storeSearch, [
+    {
+      query: 'Portal 2',
+      deckStatuses: undefined,
+      limit: 10
+    }
+  ]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [3, 4]);
+  assert.deepEqual(harness.calls.rankSimilarStoreCandidates, [
+    {
+      seedAppIds: [620],
+      candidateAppIds: [3, 4],
+      candidates: [
+        {
+          appId: 3,
+          name: 'The Talos Principle',
+          storeUrl: 'https://store.steampowered.com/app/257510',
+          developers: ['Croteam'],
+          publishers: ['Devolver Digital'],
+          genres: ['Puzzle'],
+          tags: ['Puzzle', 'Philosophical'],
+          headerImage: 'https://cdn.example/talos.jpg'
+        },
+        {
+          appId: 4,
+          name: 'Unenriched Candidate',
+          storeUrl: 'https://store.steampowered.com/app/4/'
+        }
+      ]
+    }
+  ]);
+});
+
+test('steam find similar leaves store candidates unchanged when strict cacheable appdetails are unavailable', async () => {
+  const harness = createToolHarness({
+    games: [
+      {
+        appId: 620,
+        name: 'Portal 2',
+        genres: ['Puzzle'],
+        tags: ['Co-op']
+      }
+    ],
+    storeCandidates: [
+      {
+        appId: 3,
+        name: 'The Talos Principle',
+        storeUrl: 'https://store.steampowered.com/app/257510',
+        developers: ['Original Dev'],
+        genres: ['Adventure']
+      }
+    ],
+    cacheableAppDetailsById: new Map<number, StoreAppDetails | undefined>([[3, undefined]])
+  });
+
+  const result = await harness.invoke({
+    seedAppIds: [620],
+    query: 'Portal 2',
+    scope: 'store',
+    limit: 10
+  });
+
+  assert.deepEqual(parseFirstTextContent(result), []);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [3]);
+  assert.deepEqual(harness.calls.rankSimilarStoreCandidates, [
+    {
+      seedAppIds: [620],
+      candidateAppIds: [3],
+      candidates: [
+        {
+          appId: 3,
+          name: 'The Talos Principle',
+          storeUrl: 'https://store.steampowered.com/app/257510',
+          developers: ['Original Dev'],
+          genres: ['Adventure']
+        }
+      ]
+    }
+  ]);
+});
 
 test('steam find similar does not search store when query normalizes to empty and no seeds exist', async () => {
   const harness = createToolHarness({
@@ -184,7 +324,14 @@ test('steam find similar ignores explicit seed collections case-insensitively fo
   assert.deepEqual(harness.calls.rankSimilarStoreCandidates, [
     {
       seedAppIds: [2],
-      candidateAppIds: [3]
+      candidateAppIds: [3],
+      candidates: [
+        {
+          appId: 3,
+          name: 'The Talos Principle',
+          storeUrl: 'https://store.steampowered.com/app/257510'
+        }
+      ]
     }
   ]);
 });
