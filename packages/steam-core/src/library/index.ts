@@ -180,7 +180,7 @@ export class LibraryService {
 
   private async safeGetAppDetails(appId: number, warnings: string[]): Promise<StoreAppDetails | undefined> {
     try {
-      return await this.storeClient.getAppDetails(appId);
+      return await this.storeClient.getCacheableAppDetails(appId);
     } catch (error) {
       warnings.push(`Store metadata lookup failed for ${appId}: ${error instanceof Error ? error.message : 'unknown error'}`);
       return undefined;

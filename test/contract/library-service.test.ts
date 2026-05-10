@@ -115,6 +115,48 @@ test('library service includes API-owned non-installed games and enriches them f
   assert.equal(result.warnings.some((warning) => warning.includes('2051120') && warning.includes('not returned by GetOwnedGames')), false);
 });
 
+test('library service falls back to owned names when store metadata is not cacheable', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  const sparseAppDetailsPayload = JSON.stringify({
+    '2051120': {
+      success: true,
+      data: {
+        name: 'Sparse Store Name'
+      }
+    }
+  });
+  const config = new ConfigService(fixture.env).resolve();
+  const discovery = new SteamDiscoveryService(config);
+  const backend = new CloudStorageJsonCollectionBackend(
+    path.join(fixture.installDir, 'userdata', fixture.steamId, 'config', 'cloudstorage', 'cloud-storage-namespace-1.json'),
+    fixture.steamId
+  );
+  const library = new LibraryService(
+    discovery,
+    new CollectionBackendRegistry([backend]),
+    new StoreClient(async (input) => {
+      const url = new URL(String(input));
+      if (url.searchParams.get('appids') === '2051120') {
+        return new Response(sparseAppDetailsPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+      }
+
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }),
+    createOwnedGamesClient([{ appId: 2051120, name: 'Owned Fallback Name', playtimeForever: 0 }]),
+    new DeckStatusProvider(async () => new Response('{"results":{"resolved_category":3}}', { status: 200, headers: { 'content-type': 'application/json' } }) as Response),
+    new LinkService()
+  );
+
+  const result = await library.list({ includeStoreMetadata: true, includeDeckStatus: false, limit: 10 });
+  const ownedFallback = result.games.find((game) => game.appId === 2051120);
+  assert.ok(ownedFallback);
+  assert.equal(ownedFallback.name, 'Owned Fallback Name');
+  assert.equal(ownedFallback.tags, undefined);
+  assert.equal(ownedFallback.storeUrl, undefined);
+  assert.equal(result.warnings.some((warning) => warning.includes('Store metadata lookup failed for 2051120')), false);
+});
+
 test('library service warns about stale collection refs that are absent from API-owned games', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const fixture = await materializeSteamFixture(repoRoot);
