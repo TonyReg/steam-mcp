@@ -302,7 +302,8 @@ test('official store client calls Query with input_json request payload and norm
     data_request: {
       include_basic_info: true,
       include_release: true,
-      include_links: true
+      include_links: true,
+      include_tag_count: true
     }
   });
 });

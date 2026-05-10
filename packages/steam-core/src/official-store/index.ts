@@ -76,23 +76,36 @@ export class OfficialStoreClient {
   }
 
   async queryItems(request: OfficialStoreQueryItemsOptions): Promise<OfficialStoreQueryItemsResult> {
+    const filters: Record<string, unknown> = {
+      coming_soon_only: request.comingSoonOnly ?? true,
+      only_free_items: request.freeToPlay === true ? true : undefined,
+      exclude_free_items: request.freeToPlay === false ? true : undefined,
+      type_filters: {
+        include_apps: true,
+        include_games: request.types === undefined || request.types.includes('game'),
+        include_dlc: request.types === undefined || request.types.includes('dlc'),
+        include_software: request.types === undefined || request.types.includes('software')
+      }
+    };
+
+    // Add tag filters if provided
+    if (request.tagIdsMustMatch && request.tagIdsMustMatch.length > 0) {
+      filters.tagids_must_match = request.tagIdsMustMatch.map(id => ({ tagid: id }));
+    }
+    if (request.tagIds && request.tagIds.length > 0) {
+      filters.tagids = request.tagIds;
+    }
+    if (request.tagIdsExclude && request.tagIdsExclude.length > 0) {
+      filters.tagids_exclude = request.tagIdsExclude;
+    }
+
     const response = await this.fetchServiceInterfaceJson(
       'https://api.steampowered.com/IStoreQueryService/Query/v1/',
       {
         query: {
           start: 0,
           count: request.limit ?? 20,
-          filters: {
-            coming_soon_only: request.comingSoonOnly ?? true,
-            only_free_items: request.freeToPlay === true ? true : undefined,
-            exclude_free_items: request.freeToPlay === false ? true : undefined,
-            type_filters: {
-              include_apps: true,
-              include_games: request.types === undefined || request.types.includes('game'),
-              include_dlc: request.types === undefined || request.types.includes('dlc'),
-              include_software: request.types === undefined || request.types.includes('software')
-            }
-          }
+          filters
         },
         context: {
           language: request.language ?? 'english',
@@ -101,7 +114,8 @@ export class OfficialStoreClient {
         data_request: {
           include_basic_info: true,
           include_release: true,
-          include_links: true
+          include_links: true,
+          include_tag_count: true
         }
       },
       'Steam Web API key is required for official store query access. Set STEAM_API_KEY.',
@@ -368,6 +382,14 @@ function normalizeOfficialStoreItem(payload: unknown): OfficialStoreItemSummary[
         ? false
         : undefined;
 
+  // Extract tag IDs from the response
+  const tagIds = Array.isArray(payload.tag_ids)
+    ? payload.tag_ids.flatMap((id) => {
+        const tagId = toNumber(id);
+        return tagId ? [tagId] : [];
+      })
+    : undefined;
+
   return [{
     appId,
     name,
@@ -375,6 +397,7 @@ function normalizeOfficialStoreItem(payload: unknown): OfficialStoreItemSummary[
     releaseDate,
     comingSoon,
     ...(freeToPlay === undefined ? {} : { freeToPlay }),
+    ...(tagIds === undefined || tagIds.length === 0 ? {} : { tagIds }),
     storeUrl
   } satisfies OfficialStoreItemSummary];
 }
