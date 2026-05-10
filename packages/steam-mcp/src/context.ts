@@ -16,7 +16,6 @@ import {
   SteamDiscoveryService,
   StoreClient
 } from '@steam-mcp/steam-core';
-import { createStoreAppDetailsFallbackFetch } from './store-appdetails-fallback.js';
 
 export interface SteamMcpContext {
   configService: ConfigService;
@@ -44,11 +43,7 @@ export function createSteamMcpContext(env: NodeJS.ProcessEnv = process.env): Ste
     steamWebApiKey: config.steamWebApiKey,
     fetchImpl: fetch
   });
-  const storeClient = new StoreClient(createStoreAppDetailsFallbackFetch({
-    fetchImpl: fetch,
-    officialStoreClient,
-    getSelectedUserId: async () => (await discoveryService.discover()).selectedUserId
-  }), deckStatusProvider, {
+  const storeClient = new StoreClient(fetch, deckStatusProvider, {
     cacheDir: path.join(config.stateDirectories.metadataDir, 'store-appdetails'),
     cacheTtlMs: config.storeAppDetailsCacheTtlMs
   });
