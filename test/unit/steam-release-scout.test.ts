@@ -41,7 +41,8 @@ function createContext(options: {
     getItems: [] as Array<unknown>,
     queryItems: [] as Array<unknown>,
     getAppList: 0,
-    getAppDetails: [] as number[]
+    getAppDetails: [] as number[],
+    getCacheableAppDetails: [] as number[]
   };
 
   const context = {
@@ -96,6 +97,16 @@ function createContext(options: {
           throw new Error(`getAppDetails: no mock configured for appId ${String(appId)}`);
         }
         throw new Error(`getAppDetails should not be called for ${String(appId)}`);
+      },
+      getCacheableAppDetails: async (appId: number) => {
+        calls.getCacheableAppDetails.push(appId);
+        if (options.appDetailsMap) {
+          if (options.appDetailsMap.has(appId)) {
+            return options.appDetailsMap.get(appId);
+          }
+          throw new Error(`getCacheableAppDetails: no mock configured for appId ${String(appId)}`);
+        }
+        throw new Error(`getCacheableAppDetails should not be called for ${String(appId)}`);
       }
     }
   } as unknown as SteamMcpContext;
@@ -173,7 +184,7 @@ test('steam release scout returns upcoming releases from the query-backed offici
   assert.deepEqual(harness.calls.getItems, []);
   assert.deepEqual(harness.calls.queryItems, [{ limit: 3, types: ['game', 'dlc'], comingSoonOnly: true }]);
   assert.equal(harness.calls.getAppList, 0);
-  assert.deepEqual(harness.calls.getAppDetails, []);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, []);
 });
 
 test('steam release scout forwards freeToPlay on the query-backed upcoming path and preserves upstream-filtered results', async () => {
@@ -401,7 +412,7 @@ test('steam release scout can still fill the requested upcoming limit after auth
     }
   ]);
   assert.deepEqual(harness.calls.queryItems, [{ limit: 6, types: ['game'], comingSoonOnly: true }]);
-  assert.deepEqual(harness.calls.getAppDetails, [80, 81, 82, 83]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [80, 81, 82, 83]);
 });
 
 test('steam release scout preserves query ordering while using the larger upcoming candidate window', async () => {
@@ -713,7 +724,7 @@ test('steam release scout reports explicit missing-key failures for the default 
   assert.deepEqual(parseFirstTextContent(result), {
     error: 'Steam Web API key is required for official store query access. Set STEAM_API_KEY.'
   });
-  assert.deepEqual(harness.calls.getAppDetails, []);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, []);
   assert.equal(harness.calls.getAppList, 0);
   assert.equal(harness.calls.getTopReleasesPages, 0);
   assert.deepEqual(harness.calls.getItems, []);
@@ -737,7 +748,7 @@ test('steam release scout reports explicit missing-key failures for the released
 
 // Phase 1c: authoritative human-readable facet filtering tests
 
-test('steam release scout filters upcoming path by human-readable tags via getAppDetails', async () => {
+test('steam release scout filters upcoming path by human-readable tags via getCacheableAppDetails', async () => {
   const appDetailsMap = new Map<number, StoreAppDetails | undefined>([
     [10, { appId: 10, name: 'Future RPG', type: 'game', genres: ['RPG'], categories: ['Single-player'], tags: ['RPG', 'Fantasy'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/10/' }],
     [11, { appId: 11, name: 'Future FPS', type: 'game', genres: ['Action'], categories: ['Single-player'], tags: ['FPS', 'Shooter'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/11/' }]
@@ -760,10 +771,10 @@ test('steam release scout filters upcoming path by human-readable tags via getAp
   assert.equal(parsed[0].appId, 10);
   assert.ok(parsed[0].filtersApplied.includes('tags:rpg'));
   // Both apps fetched for authoritative filtering; only RPG passes
-  assert.deepEqual(harness.calls.getAppDetails, [10, 11]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [10, 11]);
 });
 
-test('steam release scout applies AND across genre and category facets', async () => {
+test('steam release scout applies AND across genre and category facets via getCacheableAppDetails', async () => {
   const appDetailsMap = new Map<number, StoreAppDetails | undefined>([
     [10, { appId: 10, name: 'RPG with MP', type: 'game', genres: ['RPG'], categories: ['Multi-player'], tags: [], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/10/' }],
     [11, { appId: 11, name: 'RPG SP only', type: 'game', genres: ['RPG'], categories: ['Single-player'], tags: [], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/11/' }]
@@ -787,10 +798,10 @@ test('steam release scout applies AND across genre and category facets', async (
   assert.equal(parsed[0].appId, 10);
   assert.ok(parsed[0].filtersApplied.includes('genres:rpg'));
   assert.ok(parsed[0].filtersApplied.includes('categories:multi-player'));
-  assert.deepEqual(harness.calls.getAppDetails, [10, 11]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [10, 11]);
 });
 
-test('steam release scout filters released charts path by human-readable genres via getAppDetails', async () => {
+test('steam release scout filters released charts path by human-readable genres via getCacheableAppDetails', async () => {
   const appDetailsMap = new Map<number, StoreAppDetails | undefined>([
     [20, { appId: 20, name: 'Action Game', type: 'game', genres: ['Action'], categories: ['Single-player'], tags: ['Action', 'Shooter'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/20/' }],
     [21, { appId: 21, name: 'Puzzle Game', type: 'game', genres: ['Puzzle'], categories: ['Single-player'], tags: ['Puzzle', 'Relaxing'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/21/' }]
@@ -813,12 +824,12 @@ test('steam release scout filters released charts path by human-readable genres 
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].appId, 20);
   // Chart ordering preserved: both fetched, only Action passes
-  assert.deepEqual(harness.calls.getAppDetails, [20, 21]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [20, 21]);
   assert.equal(harness.calls.getTopReleasesPages, 1);
   assert.deepEqual(harness.calls.getItems, [{ appIds: [20, 21] }]);
 });
 
-test('steam release scout excludes app when getAppDetails returns undefined and facet filters are requested', async () => {
+test('steam release scout excludes app when getCacheableAppDetails returns undefined and facet filters are requested', async () => {
   const appDetailsMap = new Map<number, StoreAppDetails | undefined>([
     [10, undefined], // missing details → must be excluded
     [11, { appId: 11, name: 'Future RPG', type: 'game', genres: ['RPG'], categories: ['Single-player'], tags: ['RPG'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/11/' }]
@@ -840,17 +851,17 @@ test('steam release scout excludes app when getAppDetails returns undefined and 
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].appId, 11);
   // Both apps attempted; appId 10 excluded due to missing details
-  assert.deepEqual(harness.calls.getAppDetails, [10, 11]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [10, 11]);
 });
 
-test('steam release scout does not call getAppDetails when no facet filters are supplied', async () => {
+test('steam release scout does not call getCacheableAppDetails when no facet filters are supplied', async () => {
   const harness = createContext({
     queryItemsResult: {
       items: [
         { appId: 10, name: 'Future Game', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/10/' }
       ]
     }
-    // No appDetailsMap provided — getAppDetails would throw if called
+    // No appDetailsMap provided — getCacheableAppDetails would throw if called
   });
 
   const result = await harness.invoke({ types: ['game'] });
@@ -858,7 +869,7 @@ test('steam release scout does not call getAppDetails when no facet filters are 
   const parsed = parseFirstTextContent(result) as Array<{ appId: number }>;
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].appId, 10);
-  // Verify getAppDetails was never invoked
-  assert.deepEqual(harness.calls.getAppDetails, []);
+  // Verify getCacheableAppDetails was never invoked
+  assert.deepEqual(harness.calls.getCacheableAppDetails, []);
 });
 
