@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "tsc -b tsconfig.json",
-    "clean": "node --input-type=module --eval \"import { rm } from 'node:fs/promises'; await Promise.all(['packages/steam-core/dist','packages/steam-mcp/dist'].map((path) => rm(path, { recursive: true, force: true })));\"",
+    "clean": "node --input-type=module --eval \"import { rm } from 'node:fs/promises'; await Promise.all(['packages/steam-core/dist','packages/steam-mcp/dist','packages/steam-core/tsconfig.tsbuildinfo','packages/steam-mcp/tsconfig.tsbuildinfo'].map((path) => rm(path, { recursive: true, force: true })));\"",
     "test": "npm run build && tsx --test test/**/*.test.ts",
     "typecheck": "tsc -b tsconfig.json --pretty false"
   },
