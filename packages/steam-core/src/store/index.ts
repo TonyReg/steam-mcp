@@ -96,6 +96,26 @@ export class StoreClient {
     return cached?.details;
   }
 
+  async getCacheableAppDetails(appId: number): Promise<StoreAppDetails | undefined> {
+    const cached = await this.getCachedDetails(appId);
+    if (cached && !this.isExpired(cached) && isCacheableAppDetails(cached.details)) {
+      return cached.details;
+    }
+
+    const refreshed = await this.fetchAppDetails(appId);
+    if (refreshed && isCacheableAppDetails(refreshed.details)) {
+      this.detailCache.set(appId, refreshed);
+      await this.persistCacheEntry(appId, refreshed);
+      return refreshed.details;
+    }
+
+    if (cached && isCacheableAppDetails(cached.details)) {
+      return cached.details;
+    }
+
+    return undefined;
+  }
+
   private async getCachedDetails(appId: number): Promise<CachedAppDetails | undefined> {
     const cached = this.detailCache.get(appId);
     if (cached) {

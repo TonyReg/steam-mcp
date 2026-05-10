@@ -122,6 +122,41 @@ test('store client returns sparse appdetails live without persisting them', asyn
   assert.equal(requestCount, 3);
 });
 
+test('store client strict cacheable appdetails rejects sparse fallback but returns rich details', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const richPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-620.json'), 'utf8');
+  const sparsePayload = JSON.stringify({
+    '620': {
+      success: true,
+      data: {
+        steam_appid: 620,
+        name: 'Portal 2'
+      }
+    }
+  });
+
+  let requestCount = 0;
+  const sparseClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response(sparsePayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  });
+
+  assert.equal(await sparseClient.getCacheableAppDetails(620), undefined);
+  assert.equal(requestCount, 1);
+
+  const richClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response(richPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir: await mkdtemp(path.join(tmpdir(), 'steam-mcp-store-cache-strict-')), now: () => new Date('2026-01-01T00:00:00.000Z') });
+
+  const richDetails = await richClient.getCacheableAppDetails(620);
+  assert.ok(richDetails);
+  assert.equal(richDetails.name, 'Portal 2');
+  assert.deepEqual(richDetails.genres, ['Adventure', 'Puzzle']);
+  assert.equal(richDetails.type, 'game');
+  assert.equal(requestCount, 2);
+});
+
  test('store client ignores sparse persisted cache entries and refreshes them from richer metadata', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
   const appDetailsPayload = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-620.json'), 'utf8');
