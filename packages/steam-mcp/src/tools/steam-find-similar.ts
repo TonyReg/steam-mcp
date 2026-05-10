@@ -5,6 +5,10 @@ import type { StoreSearchCandidate } from '@steam-mcp/steam-core';
 import type { SteamMcpContext } from '../context.js';
 import { registerToolShallow } from '../mcp/register-tool-shallow.js';
 import { deckStatusSchema } from '../schemas/index.js';
+import {
+  enrichStoreCandidatesWithCacheableDetails,
+  mergeSimilarStoreCandidateWithCacheableDetails
+} from './store-cacheable-details-batch.js';
 
 const steamFindSimilarInputShape = {
   seedAppIds: z.array(z.number().int().positive()).optional(),
@@ -17,27 +21,6 @@ const steamFindSimilarInputShape = {
 
 const steamFindSimilarArgsSchema = z.object(steamFindSimilarInputShape);
 const steamFindSimilarInputSchema: Record<string, z.ZodTypeAny> = steamFindSimilarInputShape;
-
-async function enrichStoreCandidatesWithCacheableDetails(
-  storeClient: SteamMcpContext['storeClient'],
-  candidates: StoreSearchCandidate[]
-): Promise<StoreSearchCandidate[]> {
-  return Promise.all(candidates.map(async (candidate) => {
-    const details = await storeClient.getCacheableAppDetails(candidate.appId);
-    if (!details) {
-      return candidate;
-    }
-
-    return {
-      ...candidate,
-      developers: details.developers,
-      publishers: details.publishers,
-      genres: details.genres,
-      tags: details.tags,
-      headerImage: details.headerImage ?? candidate.headerImage
-    } satisfies StoreSearchCandidate;
-  }));
-}
 
 export function registerSteamFindSimilarTool(server: McpServer, context: SteamMcpContext): void {
   registerToolShallow(
@@ -87,7 +70,8 @@ export function registerSteamFindSimilarTool(server: McpServer, context: SteamMc
           seedGames,
           await enrichStoreCandidatesWithCacheableDetails(
             context.storeClient,
-            await context.storeClient.search({ query: storeSearchQuery, deckStatuses: args.deckStatuses, limit: args.limit ?? 20 })
+            await context.storeClient.search({ query: storeSearchQuery, deckStatuses: args.deckStatuses, limit: args.limit ?? 20 }),
+            mergeSimilarStoreCandidateWithCacheableDetails
           )
         )
         : [];
