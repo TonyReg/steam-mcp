@@ -4,7 +4,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {
   OfficialStoreTopReleasesPagesResult,
   OfficialStoreItemsResult,
-  OfficialStoreQueryItemsResult
+  OfficialStoreQueryItemsResult,
+  StoreAppDetails
 } from '@steam-mcp/steam-core';
 import type { SteamMcpContext } from '../../packages/steam-mcp/src/context.js';
 import { registerSteamReleaseScoutTool } from '../../packages/steam-mcp/src/tools/steam-release-scout.js';
@@ -33,6 +34,7 @@ function createContext(options: {
   topReleasesError?: Error;
   itemsError?: Error;
   queryItemsError?: Error;
+  appDetailsMap?: Map<number, StoreAppDetails | undefined>;
 }) {
   const calls = {
     getTopReleasesPages: 0,
@@ -76,6 +78,12 @@ function createContext(options: {
     storeClient: {
       getAppDetails: async (appId: number) => {
         calls.getAppDetails.push(appId);
+        if (options.appDetailsMap) {
+          if (options.appDetailsMap.has(appId)) {
+            return options.appDetailsMap.get(appId);
+          }
+          throw new Error(`getAppDetails: no mock configured for appId ${String(appId)}`);
+        }
         throw new Error(`getAppDetails should not be called for ${String(appId)}`);
       }
     }
@@ -457,3 +465,131 @@ test('steam release scout reports explicit missing-key failures for the released
   assert.deepEqual(harness.calls.getItems, []);
   assert.deepEqual(harness.calls.queryItems, []);
 });
+
+// Phase 1c: authoritative human-readable facet filtering tests
+
+test('steam release scout filters upcoming path by human-readable tags via getAppDetails', async () => {
+  const appDetailsMap = new Map<number, StoreAppDetails | undefined>([
+    [10, { appId: 10, name: 'Future RPG', type: 'game', genres: ['RPG'], categories: ['Single-player'], tags: ['RPG', 'Fantasy'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/10/' }],
+    [11, { appId: 11, name: 'Future FPS', type: 'game', genres: ['Action'], categories: ['Single-player'], tags: ['FPS', 'Shooter'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/11/' }]
+  ]);
+
+  const harness = createContext({
+    queryItemsResult: {
+      items: [
+        { appId: 10, name: 'Future RPG', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/10/' },
+        { appId: 11, name: 'Future FPS', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/11/' }
+      ]
+    },
+    appDetailsMap
+  });
+
+  const result = await harness.invoke({ types: ['game'], tags: ['RPG'] });
+
+  const parsed = parseFirstTextContent(result) as Array<{ appId: number; filtersApplied: string[] }>;
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].appId, 10);
+  assert.ok(parsed[0].filtersApplied.includes('tags:rpg'));
+  // Both apps fetched for authoritative filtering; only RPG passes
+  assert.deepEqual(harness.calls.getAppDetails, [10, 11]);
+});
+
+test('steam release scout applies AND across genre and category facets', async () => {
+  const appDetailsMap = new Map<number, StoreAppDetails | undefined>([
+    [10, { appId: 10, name: 'RPG with MP', type: 'game', genres: ['RPG'], categories: ['Multi-player'], tags: [], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/10/' }],
+    [11, { appId: 11, name: 'RPG SP only', type: 'game', genres: ['RPG'], categories: ['Single-player'], tags: [], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/11/' }]
+  ]);
+
+  const harness = createContext({
+    queryItemsResult: {
+      items: [
+        { appId: 10, name: 'RPG with MP', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/10/' },
+        { appId: 11, name: 'RPG SP only', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/11/' }
+      ]
+    },
+    appDetailsMap
+  });
+
+  // genres: ['RPG'] AND categories: ['Multi-player'] → only appId 10 satisfies both
+  const result = await harness.invoke({ types: ['game'], genres: ['RPG'], categories: ['Multi-player'] });
+
+  const parsed = parseFirstTextContent(result) as Array<{ appId: number; filtersApplied: string[] }>;
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].appId, 10);
+  assert.ok(parsed[0].filtersApplied.includes('genres:rpg'));
+  assert.ok(parsed[0].filtersApplied.includes('categories:multi-player'));
+  assert.deepEqual(harness.calls.getAppDetails, [10, 11]);
+});
+
+test('steam release scout filters released charts path by human-readable genres via getAppDetails', async () => {
+  const appDetailsMap = new Map<number, StoreAppDetails | undefined>([
+    [20, { appId: 20, name: 'Action Game', type: 'game', genres: ['Action'], categories: ['Single-player'], tags: ['Action', 'Shooter'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/20/' }],
+    [21, { appId: 21, name: 'Puzzle Game', type: 'game', genres: ['Puzzle'], categories: ['Single-player'], tags: ['Puzzle', 'Relaxing'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/21/' }]
+  ]);
+
+  const harness = createContext({
+    topReleasesResult: { pages: [{ pageId: 1, pageName: 'Featured', appIds: [20, 21] }] },
+    itemsResult: {
+      items: [
+        { appId: 20, name: 'Action Game', type: 'game', releaseDate: 'May 1, 2026', comingSoon: false, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/20/' },
+        { appId: 21, name: 'Puzzle Game', type: 'game', releaseDate: 'May 2, 2026', comingSoon: false, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/21/' }
+      ]
+    },
+    appDetailsMap
+  });
+
+  const result = await harness.invoke({ types: ['game'], comingSoonOnly: false, genres: ['Action'] });
+
+  const parsed = parseFirstTextContent(result) as Array<{ appId: number }>;
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].appId, 20);
+  // Chart ordering preserved: both fetched, only Action passes
+  assert.deepEqual(harness.calls.getAppDetails, [20, 21]);
+  assert.equal(harness.calls.getTopReleasesPages, 1);
+  assert.deepEqual(harness.calls.getItems, [{ appIds: [20, 21] }]);
+});
+
+test('steam release scout excludes app when getAppDetails returns undefined and facet filters are requested', async () => {
+  const appDetailsMap = new Map<number, StoreAppDetails | undefined>([
+    [10, undefined], // missing details → must be excluded
+    [11, { appId: 11, name: 'Future RPG', type: 'game', genres: ['RPG'], categories: ['Single-player'], tags: ['RPG'], developers: [], publishers: [], storeUrl: 'https://store.steampowered.com/app/11/' }]
+  ]);
+
+  const harness = createContext({
+    queryItemsResult: {
+      items: [
+        { appId: 10, name: 'Future Game', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/10/' },
+        { appId: 11, name: 'Future RPG', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/11/' }
+      ]
+    },
+    appDetailsMap
+  });
+
+  const result = await harness.invoke({ types: ['game'], genres: ['RPG'] });
+
+  const parsed = parseFirstTextContent(result) as Array<{ appId: number }>;
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].appId, 11);
+  // Both apps attempted; appId 10 excluded due to missing details
+  assert.deepEqual(harness.calls.getAppDetails, [10, 11]);
+});
+
+test('steam release scout does not call getAppDetails when no facet filters are supplied', async () => {
+  const harness = createContext({
+    queryItemsResult: {
+      items: [
+        { appId: 10, name: 'Future Game', type: 'game', releaseDate: 'Coming soon', comingSoon: true, freeToPlay: false, storeUrl: 'https://store.steampowered.com/app/10/' }
+      ]
+    }
+    // No appDetailsMap provided — getAppDetails would throw if called
+  });
+
+  const result = await harness.invoke({ types: ['game'] });
+
+  const parsed = parseFirstTextContent(result) as Array<{ appId: number }>;
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].appId, 10);
+  // Verify getAppDetails was never invoked
+  assert.deepEqual(harness.calls.getAppDetails, []);
+});
+
