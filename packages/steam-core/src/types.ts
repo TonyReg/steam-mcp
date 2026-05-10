@@ -324,6 +324,21 @@ export interface OfficialStoreQueryItemsResult {
   items: OfficialStoreItemSummary[];
 }
 
+export interface OfficialStorePrioritizeAppsOptions {
+  appIds: number[];
+  steamId?: string;
+  countryCode?: string;
+  includeOwnedGames?: boolean;
+}
+
+export interface OfficialStorePrioritizedAppSummary {
+  appId: number;
+}
+
+export interface OfficialStorePrioritizeAppsResult {
+  apps: OfficialStorePrioritizedAppSummary[];
+}
+
 export interface OfficialStoreAppSummary {
   appId: number;
   name: string;
