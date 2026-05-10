@@ -121,13 +121,18 @@ export interface CollectionApplyResult {
 export interface StoreSearchCandidate {
   appId: number;
   name: string;
+  type?: 'game' | 'software' | 'dlc';
   price?: string;
   isFree?: boolean;
+  releaseDate?: string;
+  comingSoon?: boolean;
   headerImage?: string;
   developers?: string[];
   publishers?: string[];
   genres?: string[];
+  categories?: string[];
   tags?: string[];
+  shortDescription?: string;
   storeUrl: string;
   deckStatus?: DeckStatus;
 }
