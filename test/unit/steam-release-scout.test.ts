@@ -176,7 +176,7 @@ test('steam release scout returns upcoming releases from the query-backed offici
   assert.deepEqual(harness.calls.getAppDetails, []);
 });
 
-test('steam release scout applies freeToPlay on the query-backed upcoming path and reports provenance', async () => {
+test('steam release scout forwards freeToPlay on the query-backed upcoming path and preserves upstream-filtered results', async () => {
   const harness = createContext({
     queryItemsResult: {
       items: [
@@ -191,11 +191,10 @@ test('steam release scout applies freeToPlay on the query-backed upcoming path a
         },
         {
           appId: 51,
-          name: 'Paid Future Game',
+          name: 'Future Game With Unknown Pricing',
           type: 'game',
           releaseDate: 'Coming soon',
           comingSoon: true,
-          freeToPlay: false,
           storeUrl: 'https://store.steampowered.com/app/51/'
         }
       ]
@@ -216,9 +215,75 @@ test('steam release scout applies freeToPlay on the query-backed upcoming path a
       ordering: 'query',
       filtersApplied: ['types:game', 'comingSoonOnly:true', 'freeToPlay:true'],
       storeUrl: 'https://store.steampowered.com/app/50/'
+    },
+    {
+      appId: 51,
+      name: 'Future Game With Unknown Pricing',
+      type: 'game',
+      releaseDate: 'Coming soon',
+      comingSoon: true,
+      source: 'query',
+      ordering: 'query',
+      filtersApplied: ['types:game', 'comingSoonOnly:true', 'freeToPlay:true'],
+      storeUrl: 'https://store.steampowered.com/app/51/'
     }
   ]);
   assert.deepEqual(harness.calls.queryItems, [{ limit: 15, types: ['game'], comingSoonOnly: true, freeToPlay: true }]);
+});
+
+test('steam release scout keeps upstream-filtered upcoming paid results when pricing metadata is undefined', async () => {
+  const harness = createContext({
+    queryItemsResult: {
+      items: [
+        {
+          appId: 52,
+          name: 'Paid Future Game With Unknown Pricing',
+          type: 'game',
+          releaseDate: 'Coming soon',
+          comingSoon: true,
+          storeUrl: 'https://store.steampowered.com/app/52/'
+        },
+        {
+          appId: 53,
+          name: 'Explicitly Paid Future Game',
+          type: 'game',
+          releaseDate: 'Coming soon',
+          comingSoon: true,
+          freeToPlay: false,
+          storeUrl: 'https://store.steampowered.com/app/53/'
+        }
+      ]
+    }
+  });
+
+  const result = await harness.invoke({ limit: 5, types: ['game'], freeToPlay: false });
+
+  assert.deepEqual(parseFirstTextContent(result), [
+    {
+      appId: 52,
+      name: 'Paid Future Game With Unknown Pricing',
+      type: 'game',
+      releaseDate: 'Coming soon',
+      comingSoon: true,
+      source: 'query',
+      ordering: 'query',
+      filtersApplied: ['types:game', 'comingSoonOnly:true', 'freeToPlay:false'],
+      storeUrl: 'https://store.steampowered.com/app/52/'
+    },
+    {
+      appId: 53,
+      name: 'Explicitly Paid Future Game',
+      type: 'game',
+      releaseDate: 'Coming soon',
+      comingSoon: true,
+      freeToPlay: false,
+      source: 'query',
+      ordering: 'query',
+      filtersApplied: ['types:game', 'comingSoonOnly:true', 'freeToPlay:false'],
+      storeUrl: 'https://store.steampowered.com/app/53/'
+    }
+  ]);
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 15, types: ['game'], comingSoonOnly: true, freeToPlay: false }]);
 });
 
 test('steam release scout overfetches upcoming query candidates before final trimming', async () => {

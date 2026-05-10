@@ -114,7 +114,7 @@ export function registerSteamReleaseScoutTool(server: McpServer, context: SteamM
             continue;
           }
 
-          if (freeToPlay !== undefined && item.freeToPlay !== freeToPlay) {
+          if (!comingSoonOnly && freeToPlay !== undefined && item.freeToPlay !== freeToPlay) {
             continue;
           }
 
