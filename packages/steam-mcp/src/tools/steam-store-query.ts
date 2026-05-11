@@ -15,6 +15,8 @@ const steamStoreQueryTypeSchema = z.enum(['game', 'software', 'dlc']);
 const steamStoreQueryInputShape = {
   limit: z.number().int().min(1).max(100).optional(),
   types: z.array(steamStoreQueryTypeSchema).optional(),
+  language: z.string().min(1).optional(),
+  countryCode: z.string().min(1).optional(),
   comingSoonOnly: z.boolean().optional(),
   freeToPlay: z.boolean().optional(),
   genres: z.array(z.string().min(1)).optional(),
@@ -60,6 +62,14 @@ function buildOfficialStoreQueryArgs(args: SteamStoreQueryArgs, limitOverride?: 
 
   if (args.types !== undefined) {
     request.types = args.types;
+  }
+
+  if (args.language !== undefined) {
+    request.language = args.language;
+  }
+
+  if (args.countryCode !== undefined) {
+    request.countryCode = args.countryCode;
   }
 
   if (args.comingSoonOnly !== undefined) {

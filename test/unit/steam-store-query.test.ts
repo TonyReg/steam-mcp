@@ -153,6 +153,8 @@ test('steam store query preserves the passthrough path when no facet filters are
   const result = await harness.invoke({
     limit: 5,
     types: ['game', 'dlc'],
+    language: 'german',
+    countryCode: 'DE',
     comingSoonOnly: false,
     freeToPlay: true
   });
@@ -160,6 +162,8 @@ test('steam store query preserves the passthrough path when no facet filters are
   assert.deepEqual(harness.calls.queryItems, [{
     limit: 5,
     types: ['game', 'dlc'],
+    language: 'german',
+    countryCode: 'DE',
     comingSoonOnly: false,
     freeToPlay: true
   }]);
@@ -248,16 +252,55 @@ test('steam store query overfetches before authoritative genre filtering', async
 
   const result = await harness.invoke({
     limit: 2,
+    language: 'schinese',
+    countryCode: 'CN',
     genres: [' Puzzle ']
   });
 
   assert.deepEqual(harness.calls.queryItems, [{
-    limit: 6
+    limit: 6,
+    language: 'schinese',
+    countryCode: 'CN'
   }]);
   assert.deepEqual(harness.calls.getCacheableAppDetails, [1, 2, 3]);
   assert.deepEqual(parseFirstTextContent(result), [
     { appId: 1, name: 'Alpha', storeUrl: 'https://store.steampowered.com/app/1/' },
     { appId: 3, name: 'Gamma', storeUrl: 'https://store.steampowered.com/app/3/' }
+  ]);
+});
+
+
+test('steam store query forwards locale passthrough through authoritative facet filtering', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [
+        createOfficialItem({ appId: 81, name: 'Locale Match', storeUrl: 'https://store.steampowered.com/app/81/' }),
+        createOfficialItem({ appId: 82, name: 'Locale Skip', storeUrl: 'https://store.steampowered.com/app/82/' }),
+        createOfficialItem({ appId: 83, name: 'Locale Unused', storeUrl: 'https://store.steampowered.com/app/83/' })
+      ]
+    },
+    cacheableDetailsByAppId: {
+      81: createCacheableDetails({ appId: 81, name: 'Locale Match', genres: ['Puzzle'], storeUrl: 'https://store.steampowered.com/app/81/' }),
+      82: createCacheableDetails({ appId: 82, name: 'Locale Skip', genres: ['Action'], storeUrl: 'https://store.steampowered.com/app/82/' }),
+      83: createCacheableDetails({ appId: 83, name: 'Locale Unused', genres: ['Puzzle'], storeUrl: 'https://store.steampowered.com/app/83/' })
+    }
+  });
+
+  const result = await harness.invoke({
+    limit: 1,
+    language: 'japanese',
+    countryCode: 'JP',
+    genres: ['Puzzle']
+  });
+
+  assert.deepEqual(harness.calls.queryItems, [{
+    limit: 3,
+    language: 'japanese',
+    countryCode: 'JP'
+  }]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [81]);
+  assert.deepEqual(parseFirstTextContent(result), [
+    { appId: 81, name: 'Locale Match', storeUrl: 'https://store.steampowered.com/app/81/' }
   ]);
 });
 
