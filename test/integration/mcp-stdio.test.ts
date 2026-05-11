@@ -154,13 +154,19 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       arguments: {
         limit: '12',
         types: 'game,dlc',
-        comingSoonOnly: 'false'
+        language: 'japanese',
+        countryCode: 'JP',
+        comingSoonOnly: 'false',
+        freeToPlay: 'true'
       }
     });
     assert.match(JSON.stringify(releaseScoutPrompt), /steam_release_scout/);
     assert.match(JSON.stringify(releaseScoutPrompt), /Requested result limit: 12/);
     assert.match(JSON.stringify(releaseScoutPrompt), /Requested release types: game, dlc/);
+    assert.match(JSON.stringify(releaseScoutPrompt), /Requested language: japanese/);
+    assert.match(JSON.stringify(releaseScoutPrompt), /Requested country code: JP/);
     assert.match(JSON.stringify(releaseScoutPrompt), /Coming soon only: false/);
+    assert.match(JSON.stringify(releaseScoutPrompt), /Free to play filter: true/);
     assert.match(JSON.stringify(releaseScoutPrompt), /STEAM_API_KEY/);
 
     const libraryCuratorPrompt = await client.getPrompt({
