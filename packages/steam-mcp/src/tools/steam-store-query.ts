@@ -19,7 +19,10 @@ const steamStoreQueryInputShape = {
   freeToPlay: z.boolean().optional(),
   genres: z.array(z.string().min(1)).optional(),
   categories: z.array(z.string().min(1)).optional(),
-  tags: z.array(z.string().min(1)).optional()
+  tags: z.array(z.string().min(1)).optional(),
+  genresExclude: z.array(z.string().min(1)).optional(),
+  categoriesExclude: z.array(z.string().min(1)).optional(),
+  tagsExclude: z.array(z.string().min(1)).optional()
 };
 
 const steamStoreQueryArgsSchema = z.object(steamStoreQueryInputShape);
@@ -71,15 +74,30 @@ function matchesFacetFamily(expected: string[] | undefined, actual: string[]): b
   return expected.some((value) => normalizedActual.has(value));
 }
 
+function matchesExcludedFacetFamily(excluded: string[] | undefined, actual: string[]): boolean {
+  if (!excluded || excluded.length === 0) {
+    return false;
+  }
+
+  const normalizedActual = new Set(actual.map((value) => value.trim().toLowerCase()).filter((value) => value.length > 0));
+  return excluded.some((value) => normalizedActual.has(value));
+}
+
 function matchesFacetFilters(
   details: StoreAppDetails,
   genres: string[] | undefined,
   categories: string[] | undefined,
-  tags: string[] | undefined
+  tags: string[] | undefined,
+  genresExclude: string[] | undefined,
+  categoriesExclude: string[] | undefined,
+  tagsExclude: string[] | undefined
 ): boolean {
   return matchesFacetFamily(genres, details.genres)
     && matchesFacetFamily(categories, details.categories)
-    && matchesFacetFamily(tags, details.tags);
+    && matchesFacetFamily(tags, details.tags)
+    && !matchesExcludedFacetFamily(genresExclude, details.genres)
+    && !matchesExcludedFacetFamily(categoriesExclude, details.categories)
+    && !matchesExcludedFacetFamily(tagsExclude, details.tags);
 }
 
 async function filterItemsByCacheableFacets(
@@ -88,7 +106,10 @@ async function filterItemsByCacheableFacets(
   limit: number | undefined,
   genres: string[] | undefined,
   categories: string[] | undefined,
-  tags: string[] | undefined
+  tags: string[] | undefined,
+  genresExclude: string[] | undefined,
+  categoriesExclude: string[] | undefined,
+  tagsExclude: string[] | undefined
 ): Promise<OfficialStoreItemSummary[]> {
   const matches: OfficialStoreItemSummary[] = [];
 
@@ -105,7 +126,7 @@ async function filterItemsByCacheableFacets(
       continue;
     }
 
-    if (!matchesFacetFilters(details, genres, categories, tags)) {
+    if (!matchesFacetFilters(details, genres, categories, tags, genresExclude, categoriesExclude, tagsExclude)) {
       continue;
     }
 
@@ -124,7 +145,7 @@ export function registerSteamStoreQueryTool(server: McpServer, context: SteamMcp
     'steam_store_query',
     {
       title: 'Steam store query',
-      description: 'Query the authenticated official Steam catalog with type, release-state, free-to-play, and human-readable genre/category/tag filters. Read-only and Steam Web API key dependent.',
+      description: 'Query the authenticated official Steam catalog with type, release-state, free-to-play, and human-readable genre/category/tag include and exclude filters. Read-only and Steam Web API key dependent.',
       inputSchema: steamStoreQueryInputSchema
     },
     async (rawArgs) => {
@@ -132,7 +153,17 @@ export function registerSteamStoreQueryTool(server: McpServer, context: SteamMcp
       const normalizedGenres = normalizeFacetFilter(args.genres);
       const normalizedCategories = normalizeFacetFilter(args.categories);
       const normalizedTags = normalizeFacetFilter(args.tags);
-      const requiresFacetFiltering = Boolean(normalizedGenres || normalizedCategories || normalizedTags);
+      const normalizedGenresExclude = normalizeFacetFilter(args.genresExclude);
+      const normalizedCategoriesExclude = normalizeFacetFilter(args.categoriesExclude);
+      const normalizedTagsExclude = normalizeFacetFilter(args.tagsExclude);
+      const requiresFacetFiltering = Boolean(
+        normalizedGenres
+        || normalizedCategories
+        || normalizedTags
+        || normalizedGenresExclude
+        || normalizedCategoriesExclude
+        || normalizedTagsExclude
+      );
 
       try {
         if (!requiresFacetFiltering) {
@@ -154,7 +185,10 @@ export function registerSteamStoreQueryTool(server: McpServer, context: SteamMcp
           args.limit,
           normalizedGenres,
           normalizedCategories,
-          normalizedTags
+          normalizedTags,
+          normalizedGenresExclude,
+          normalizedCategoriesExclude,
+          normalizedTagsExclude
         );
 
         return {

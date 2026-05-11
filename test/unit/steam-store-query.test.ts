@@ -26,26 +26,41 @@ function parseFirstTextContent(result: ToolResult): unknown {
   return JSON.parse(firstContent.text ?? 'null');
 }
 
-function createOfficialItem(overrides: Partial<OfficialStoreItemSummary> & Pick<OfficialStoreItemSummary, 'appId' | 'name' | 'storeUrl'>): OfficialStoreItemSummary {
+function createOfficialItem({
+  appId,
+  name,
+  storeUrl,
+  ...rest
+}: Partial<OfficialStoreItemSummary> & Pick<OfficialStoreItemSummary, 'appId' | 'name' | 'storeUrl'>): OfficialStoreItemSummary {
   return {
-    appId: overrides.appId,
-    name: overrides.name,
-    storeUrl: overrides.storeUrl,
-    ...overrides
+    appId,
+    name,
+    storeUrl,
+    ...rest
   };
 }
 
-function createCacheableDetails(overrides: Partial<StoreAppDetails> & Pick<StoreAppDetails, 'appId' | 'name' | 'storeUrl'>): StoreAppDetails {
+function createCacheableDetails({
+  appId,
+  name,
+  storeUrl,
+  developers,
+  publishers,
+  genres,
+  categories,
+  tags,
+  ...rest
+}: Partial<StoreAppDetails> & Pick<StoreAppDetails, 'appId' | 'name' | 'storeUrl'>): StoreAppDetails {
   return {
-    appId: overrides.appId,
-    name: overrides.name,
-    developers: overrides.developers ?? [],
-    publishers: overrides.publishers ?? [],
-    genres: overrides.genres ?? [],
-    categories: overrides.categories ?? [],
-    tags: overrides.tags ?? [],
-    storeUrl: overrides.storeUrl,
-    ...overrides
+    appId,
+    name,
+    developers: developers ?? [],
+    publishers: publishers ?? [],
+    genres: genres ?? [],
+    categories: categories ?? [],
+    tags: tags ?? [],
+    storeUrl,
+    ...rest
   };
 }
 
@@ -355,6 +370,226 @@ test('steam store query excludes candidates when cacheable details lookup throws
   assert.deepEqual(harness.calls.getCacheableAppDetails, [30, 31]);
   assert.deepEqual(parseFirstTextContent(result), [
     { appId: 31, name: 'Recovered Match', storeUrl: 'https://store.steampowered.com/app/31/' }
+  ]);
+});
+
+test('steam store query excludes candidates whose authoritative tags match tagsExclude', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [
+        createOfficialItem({ appId: 40, name: 'Early Access Match', storeUrl: 'https://store.steampowered.com/app/40/' }),
+        createOfficialItem({ appId: 41, name: 'Allowed Match', storeUrl: 'https://store.steampowered.com/app/41/' }),
+        createOfficialItem({ appId: 42, name: 'Case Folded Match', storeUrl: 'https://store.steampowered.com/app/42/' })
+      ]
+    },
+    cacheableDetailsByAppId: {
+      40: createCacheableDetails({
+        appId: 40,
+        name: 'Early Access Match',
+        tags: ['Early Access'],
+        storeUrl: 'https://store.steampowered.com/app/40/'
+      }),
+      41: createCacheableDetails({
+        appId: 41,
+        name: 'Allowed Match',
+        tags: ['Puzzle'],
+        storeUrl: 'https://store.steampowered.com/app/41/'
+      }),
+      42: createCacheableDetails({
+        appId: 42,
+        name: 'Case Folded Match',
+        tags: ['EARLY ACCESS', 'Action'],
+        storeUrl: 'https://store.steampowered.com/app/42/'
+      })
+    }
+  });
+
+  const result = await harness.invoke({ tagsExclude: [' Early Access '] });
+
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [40, 41, 42]);
+  assert.deepEqual(parseFirstTextContent(result), [
+    { appId: 41, name: 'Allowed Match', storeUrl: 'https://store.steampowered.com/app/41/' }
+  ]);
+});
+
+test('steam store query composes include and exclude facet filters', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [
+        createOfficialItem({ appId: 50, name: 'Allowed Co-op', storeUrl: 'https://store.steampowered.com/app/50/' }),
+        createOfficialItem({ appId: 51, name: 'Excluded Co-op', storeUrl: 'https://store.steampowered.com/app/51/' }),
+        createOfficialItem({ appId: 52, name: 'Wrong Category', storeUrl: 'https://store.steampowered.com/app/52/' })
+      ]
+    },
+    cacheableDetailsByAppId: {
+      50: createCacheableDetails({
+        appId: 50,
+        name: 'Allowed Co-op',
+        categories: ['Co-op'],
+        tags: ['Puzzle'],
+        storeUrl: 'https://store.steampowered.com/app/50/'
+      }),
+      51: createCacheableDetails({
+        appId: 51,
+        name: 'Excluded Co-op',
+        categories: ['Co-op'],
+        tags: ['Early Access'],
+        storeUrl: 'https://store.steampowered.com/app/51/'
+      }),
+      52: createCacheableDetails({
+        appId: 52,
+        name: 'Wrong Category',
+        categories: ['Single-player'],
+        tags: ['Puzzle'],
+        storeUrl: 'https://store.steampowered.com/app/52/'
+      })
+    }
+  });
+
+  const result = await harness.invoke({
+    categories: ['Co-op'],
+    tagsExclude: ['Early Access']
+  });
+
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
+  assert.deepEqual(parseFirstTextContent(result), [
+    { appId: 50, name: 'Allowed Co-op', storeUrl: 'https://store.steampowered.com/app/50/' }
+  ]);
+});
+
+test('steam store query preserves the passthrough path when exclude arrays normalize to empty', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [
+        createOfficialItem({
+          appId: 60,
+          name: 'Portal 2',
+          type: 'game',
+          releaseDate: 'Apr 18, 2011',
+          comingSoon: false,
+          freeToPlay: false,
+          storeUrl: 'https://store.steampowered.com/app/60/'
+        })
+      ]
+    }
+  });
+
+  const result = await harness.invoke({
+    genresExclude: ['   '],
+    categoriesExclude: ['\t'],
+    tagsExclude: ['  ']
+  });
+
+  assert.deepEqual(harness.calls.queryItems, [{}]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, []);
+  assert.deepEqual(parseFirstTextContent(result), [
+    {
+      appId: 60,
+      name: 'Portal 2',
+      type: 'game',
+      releaseDate: 'Apr 18, 2011',
+      comingSoon: false,
+      freeToPlay: false,
+      storeUrl: 'https://store.steampowered.com/app/60/'
+    }
+  ]);
+});
+
+test('steam store query overfetches when exclude filters are active', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [
+        createOfficialItem({ appId: 70, name: 'Excluded First', storeUrl: 'https://store.steampowered.com/app/70/' }),
+        createOfficialItem({ appId: 71, name: 'Allowed First', storeUrl: 'https://store.steampowered.com/app/71/' }),
+        createOfficialItem({ appId: 72, name: 'Allowed Second', storeUrl: 'https://store.steampowered.com/app/72/' }),
+        createOfficialItem({ appId: 73, name: 'Unused Third', storeUrl: 'https://store.steampowered.com/app/73/' }),
+        createOfficialItem({ appId: 74, name: 'Unused Fourth', storeUrl: 'https://store.steampowered.com/app/74/' }),
+        createOfficialItem({ appId: 75, name: 'Unused Fifth', storeUrl: 'https://store.steampowered.com/app/75/' })
+      ]
+    },
+    cacheableDetailsByAppId: {
+      70: createCacheableDetails({
+        appId: 70,
+        name: 'Excluded First',
+        tags: ['Early Access'],
+        storeUrl: 'https://store.steampowered.com/app/70/'
+      }),
+      71: createCacheableDetails({
+        appId: 71,
+        name: 'Allowed First',
+        tags: ['Puzzle'],
+        storeUrl: 'https://store.steampowered.com/app/71/'
+      }),
+      72: createCacheableDetails({
+        appId: 72,
+        name: 'Allowed Second',
+        tags: ['Adventure'],
+        storeUrl: 'https://store.steampowered.com/app/72/'
+      }),
+      73: createCacheableDetails({
+        appId: 73,
+        name: 'Unused Third',
+        tags: ['Action'],
+        storeUrl: 'https://store.steampowered.com/app/73/'
+      }),
+      74: createCacheableDetails({
+        appId: 74,
+        name: 'Unused Fourth',
+        tags: ['Action'],
+        storeUrl: 'https://store.steampowered.com/app/74/'
+      }),
+      75: createCacheableDetails({
+        appId: 75,
+        name: 'Unused Fifth',
+        tags: ['Action'],
+        storeUrl: 'https://store.steampowered.com/app/75/'
+      })
+    }
+  });
+
+  const result = await harness.invoke({
+    limit: 2,
+    tagsExclude: ['Early Access']
+  });
+
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 6 }]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [70, 71, 72]);
+  assert.deepEqual(parseFirstTextContent(result), [
+    { appId: 71, name: 'Allowed First', storeUrl: 'https://store.steampowered.com/app/71/' },
+    { appId: 72, name: 'Allowed Second', storeUrl: 'https://store.steampowered.com/app/72/' }
+  ]);
+});
+
+test('steam store query still skips missing and failing detail lookups when exclude filters are active', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [
+        createOfficialItem({ appId: 80, name: 'Missing Details', storeUrl: 'https://store.steampowered.com/app/80/' }),
+        createOfficialItem({ appId: 81, name: 'Lookup Failure', storeUrl: 'https://store.steampowered.com/app/81/' }),
+        createOfficialItem({ appId: 82, name: 'Allowed Match', storeUrl: 'https://store.steampowered.com/app/82/' })
+      ]
+    },
+    cacheableDetailsByAppId: {
+      80: undefined,
+      82: createCacheableDetails({
+        appId: 82,
+        name: 'Allowed Match',
+        tags: ['Puzzle'],
+        storeUrl: 'https://store.steampowered.com/app/82/'
+      })
+    },
+    cacheableDetailsErrorByAppId: {
+      81: new Error('cache miss')
+    }
+  });
+
+  const result = await harness.invoke({ tagsExclude: ['Early Access'] });
+
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [80, 81, 82]);
+  assert.deepEqual(parseFirstTextContent(result), [
+    { appId: 82, name: 'Allowed Match', storeUrl: 'https://store.steampowered.com/app/82/' }
   ]);
 });
 
