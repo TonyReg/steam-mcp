@@ -69,14 +69,18 @@ Arguments:
 
 - `limit` (optional string integer, for example `"20"`; defaults to `20` in the prompt guidance)
 - `types` (optional comma-separated string, for example `"game,dlc"`)
+- `language` (optional Steam language string, for example `"schinese"` or `"japanese"`)
+- `countryCode` (optional Steam country code string, for example `"US"` or `"JP"`)
 - `comingSoonOnly` (optional boolean string: `"true"` or `"false"`; defaults to `true` in the prompt guidance)
+- `freeToPlay` (optional boolean string: `"true"` or `"false"`)
 
 Recommended flow:
 
 1. `steam_status`
 2. `steam_release_scout`
-3. `steam_store_search`, `steam_find_similar`, or `steam_link_generate` when deeper comparison or links are useful; `steam_find_similar` can stay deterministic or use optional official prioritization for store-side comparison only with `mode="official"`, `scope="store"` or `scope="both"`, and a resolvable selected user
-4. `steam_export` for JSON or Markdown handoff
+3. Use optional `language` / `countryCode` when the user wants locale-scoped official catalog results, and optional `freeToPlay` when they want to narrow by pricing model
+4. `steam_store_search`, `steam_find_similar`, or `steam_link_generate` when deeper comparison or links are useful; `steam_find_similar` can stay deterministic or use optional official prioritization for store-side comparison only with `mode="official"`, `scope="store"` or `scope="both"`, and a resolvable selected user
+5. `steam_export` for JSON or Markdown handoff
 
 ## Safety notes
 

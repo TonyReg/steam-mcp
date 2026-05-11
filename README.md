@@ -9,7 +9,7 @@
 - Search the local library with `steam_library_search`
 - Search the public Steam store with `steam_store_search`
 - Query the authenticated official Steam catalog with `steam_store_query`
-- Scout upcoming public Steam releases with `steam_release_scout`
+- Scout upcoming or newly released Steam catalog apps with `steam_release_scout`
 - List recently played games with `steam_recently_played`
 - Find similar games with deterministic ranking by default and optional official store prioritization via `steam_find_similar`
 - Export results as JSON or Markdown with `steam_export`
@@ -107,7 +107,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 | `steam_library_search` | Search the local library with deterministic match reasons |
 | `steam_store_search` | Search the public Steam store without authenticated session reuse |
 | `steam_store_query` | Query the authenticated official Steam catalog with bounded type, release-state, free-to-play, and human-readable genre/category/tag filters; requires a Steam Web API key |
-| `steam_release_scout` | Read-only upcoming/recent release scouting via official catalog access plus public appdetails enrichment; requires a Steam Web API key |
+| `steam_release_scout` | Read-only upcoming/recent release scouting via official catalog access plus public appdetails enrichment, with optional locale passthrough and bounded human-readable facet filters; requires a Steam Web API key |
 | `steam_recently_played` | Read-only recently played game listing via the official Steam Web API; requires a Steam Web API key |
 | `steam_find_similar` | Rank similar library or store candidates with deterministic ranking by default and optional official store prioritization for `scope="store"` or `scope="both"` |
 | `steam_collection_plan` | Create a durable preview plan for collection or hidden-state changes |
