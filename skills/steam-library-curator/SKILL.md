@@ -1,6 +1,6 @@
 ---
 name: steam-library-curator
-description: "Use when the user wants safe read-only Steam library analysis, deterministic recommendations, optional store enrichment/comparison, exports, or steam:// link generation. Trigger phrases: 'organize my library', 'find similar games', 'recommend from my Steam library', 'export my Steam library', 'generate Steam links'."
+description: "Use when the user wants safe read-only Steam library analysis, recommendations grounded in deterministic overlap or optional official store prioritization, optional store enrichment/comparison, exports, or steam:// link generation. Trigger phrases: 'organize my library', 'find similar games', 'recommend from my Steam library', 'export my Steam library', 'generate Steam links'."
 ---
 
 # Steam Library Curator
@@ -10,7 +10,7 @@ Use this skill for library-first, read-heavy Steam workflows built on top of the
 ## When to Use
 
 - The user wants to analyze or organize their owned Steam library without mutating Steam-owned state.
-- The user wants deterministic recommendations based on genres, tags, favorites, collections, hidden flags, playtime, or Steam Deck status.
+- The user wants recommendations based on genres, tags, favorites, collections, hidden flags, playtime, Steam Deck status, or optional official store prioritization.
 - The user wants store enrichment or comparison after starting from the owned library, plus JSON/Markdown export or `steam://` launch/store/library/community links.
 
 ## Workflow
@@ -18,7 +18,7 @@ Use this skill for library-first, read-heavy Steam workflows built on top of the
 1. Start with the MCP prompt `steam_library_curator` when your client supports prompts.
 2. Call `steam_status` first and confirm the detected Steam user, whether `STEAM_API_KEY` is available for owned-library enumeration, the collection backend, and whether collection writes are enabled.
 3. Use `steam_library_list` or `steam_library_search` for the main analysis pass.
-4. Add `steam_find_similar` or `steam_store_search` only when you need deterministic comparison or store enrichment beyond the owned library.
+4. Add `steam_find_similar` or `steam_store_search` only when you need comparison or store enrichment beyond the owned library; keep `steam_find_similar` deterministic by default and use `mode="official"` only for `scope="store"` or `scope="both"` when authenticated official prioritization is explicitly useful.
 5. Use `steam_export` for JSON/Markdown handoff and `steam_link_generate` for actionable links.
 
 ## Safety Rules
@@ -27,7 +27,7 @@ Use this skill for library-first, read-heavy Steam workflows built on top of the
 - If `steam_status` reports that `STEAM_API_KEY` is unavailable, stop and tell the user the owned library cannot be enumerated until API-authoritative access is configured.
 - Keep the workflow library-first; unowned store games may appear only when enrichment or comparison is explicitly useful.
 - Do not switch to collection mutation unless the user explicitly asks to change Steam-owned state.
-- Explain recommendations in deterministic terms only: tags, genres, collections, favorites, hidden flags, playtime, and Deck status.
+- Explain recommendations in explicit terms: tags, genres, collections, favorites, hidden flags, playtime, Deck status, and official store prioritization only when `mode="official"` was used.
 
 ## Tool Order Reference
 
