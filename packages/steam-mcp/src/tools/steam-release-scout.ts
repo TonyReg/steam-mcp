@@ -9,6 +9,8 @@ const steamReleaseScoutTypeSchema = z.enum(['game', 'software', 'dlc']);
 const steamReleaseScoutInputShape = {
   limit: z.number().int().min(1).max(100).optional(),
   types: z.array(steamReleaseScoutTypeSchema).optional(),
+  language: z.string().min(1).optional(),
+  countryCode: z.string().min(1).optional(),
   comingSoonOnly: z.boolean().optional(),
   freeToPlay: z.boolean().optional(),
   genres: z.array(z.string()).optional(),
@@ -41,6 +43,8 @@ export function registerSteamReleaseScoutTool(server: McpServer, context: SteamM
       const typeSet = new Set(types);
       const comingSoonOnly = args.comingSoonOnly ?? true;
       const freeToPlay = args.freeToPlay;
+      const language = args.language;
+      const countryCode = args.countryCode;
 
       // Normalize authoritative facet filter arrays: trim, lowercase, drop empties
       const normalizeFacetFilter = (arr: string[] | undefined): string[] | undefined => {
@@ -63,6 +67,8 @@ export function registerSteamReleaseScoutTool(server: McpServer, context: SteamM
           itemsResult = await context.officialStoreClient.queryItems({
             limit: queryLimit,
             types,
+            ...(language === undefined ? {} : { language }),
+            ...(countryCode === undefined ? {} : { countryCode }),
             comingSoonOnly: true,
             ...(freeToPlay === undefined ? {} : { freeToPlay }),
           });
@@ -89,7 +95,11 @@ export function registerSteamReleaseScoutTool(server: McpServer, context: SteamM
             };
           }
 
-          itemsResult = await context.officialStoreClient.getItems({ appIds: orderedAppIds });
+          itemsResult = await context.officialStoreClient.getItems({
+            appIds: orderedAppIds,
+            ...(language === undefined ? {} : { language }),
+            ...(countryCode === undefined ? {} : { countryCode })
+          });
         }
 
         const itemsByAppId = new Map(itemsResult.items.map((item) => [item.appId, item]));

@@ -164,7 +164,12 @@ test('steam release scout returns upcoming releases from the query-backed offici
     }
   });
 
-  const result = await harness.invoke({ limit: 1, types: ['game', 'dlc'] });
+  const result = await harness.invoke({
+    limit: 1,
+    types: ['game', 'dlc'],
+    language: 'schinese',
+    countryCode: 'CN'
+  });
 
   assert.deepEqual(parseFirstTextContent(result), [
     {
@@ -182,7 +187,13 @@ test('steam release scout returns upcoming releases from the query-backed offici
   ]);
   assert.equal(harness.calls.getTopReleasesPages, 0);
   assert.deepEqual(harness.calls.getItems, []);
-  assert.deepEqual(harness.calls.queryItems, [{ limit: 3, types: ['game', 'dlc'], comingSoonOnly: true }]);
+  assert.deepEqual(harness.calls.queryItems, [{
+    limit: 3,
+    types: ['game', 'dlc'],
+    language: 'schinese',
+    countryCode: 'CN',
+    comingSoonOnly: true
+  }]);
   assert.equal(harness.calls.getAppList, 0);
   assert.deepEqual(harness.calls.getCacheableAppDetails, []);
 });
@@ -516,7 +527,13 @@ test('steam release scout can include released apps when comingSoonOnly is false
     }
   });
 
-  const result = await harness.invoke({ limit: 5, types: ['software'], comingSoonOnly: false });
+  const result = await harness.invoke({
+    limit: 5,
+    types: ['software'],
+    language: 'japanese',
+    countryCode: 'JP',
+    comingSoonOnly: false
+  });
 
   assert.deepEqual(parseFirstTextContent(result), [
     {
@@ -533,8 +550,58 @@ test('steam release scout can include released apps when comingSoonOnly is false
     }
   ]);
   assert.equal(harness.calls.getTopReleasesPages, 1);
-  assert.deepEqual(harness.calls.getItems, [{ appIds: [20] }]);
+  assert.deepEqual(harness.calls.getItems, [{ appIds: [20], language: 'japanese', countryCode: 'JP' }]);
   assert.deepEqual(harness.calls.queryItems, []);
+});
+
+
+test('steam release scout preserves omitted locale args so official client defaults apply on both scout paths', async () => {
+  const upcomingHarness = createContext({
+    queryItemsResult: {
+      items: [
+        {
+          appId: 120,
+          name: 'Upcoming Default Locale',
+          type: 'game',
+          releaseDate: 'Coming soon',
+          comingSoon: true,
+          freeToPlay: false,
+          storeUrl: 'https://store.steampowered.com/app/120/'
+        }
+      ]
+    }
+  });
+
+  await upcomingHarness.invoke({ limit: 1, types: ['game'] });
+  assert.deepEqual(upcomingHarness.calls.queryItems, [{ limit: 3, types: ['game'], comingSoonOnly: true }]);
+
+  const releasedHarness = createContext({
+    topReleasesResult: {
+      pages: [
+        {
+          pageId: 1,
+          pageName: 'Featured',
+          appIds: [121]
+        }
+      ]
+    },
+    itemsResult: {
+      items: [
+        {
+          appId: 121,
+          name: 'Released Default Locale',
+          type: 'game',
+          releaseDate: 'May 3, 2026',
+          comingSoon: false,
+          freeToPlay: false,
+          storeUrl: 'https://store.steampowered.com/app/121/'
+        }
+      ]
+    }
+  });
+
+  await releasedHarness.invoke({ limit: 1, types: ['game'], comingSoonOnly: false });
+  assert.deepEqual(releasedHarness.calls.getItems, [{ appIds: [121] }]);
 });
 
 test('steam release scout applies freeToPlay on the released charts path and reports provenance', async () => {
