@@ -44,12 +44,17 @@ function createToolHarness(options: {
   storeCandidates?: StoreSearchCandidate[];
   storeMatches?: SearchMatch<StoreSearchCandidate>[];
   cacheableAppDetailsById?: Map<number, StoreAppDetails | undefined>;
+  selectedUserId?: string | undefined;
+  prioritizedAppIds?: number[];
+  officialPrioritizeError?: Error;
 }) {
   const calls = {
     searchLibrary: [] as Array<unknown>,
     rankSimilarLibraryGames: [] as Array<unknown>,
     storeSearch: [] as Array<unknown>,
     getCacheableAppDetails: [] as number[],
+    prioritizeAppsForUser: [] as Array<unknown>,
+    discover: 0,
     rankSimilarStoreCandidates: [] as Array<{ seedAppIds: number[]; candidateAppIds: number[]; candidates: StoreSearchCandidate[] }>
   };
 
@@ -58,6 +63,27 @@ function createToolHarness(options: {
       resolve: () => ({
         defaultIgnoreCollections: options.defaultIgnoreCollections ?? []
       })
+    },
+    discoveryService: {
+      discover: async () => {
+        calls.discover += 1;
+        return {
+          selectedUserId: options.selectedUserId,
+          warnings: []
+        };
+      }
+    },
+    officialStoreClient: {
+      prioritizeAppsForUser: async (request: unknown) => {
+        calls.prioritizeAppsForUser.push(request);
+        if (options.officialPrioritizeError) {
+          throw options.officialPrioritizeError;
+        }
+
+        return {
+          apps: (options.prioritizedAppIds ?? []).map((appId) => ({ appId }))
+        };
+      }
     },
     libraryService: {
       list: async () => createLibraryListResult(options.games)
@@ -272,6 +298,7 @@ test('steam find similar does not search store when query normalizes to empty an
     {
       query: undefined,
       scope: 'store',
+      mode: 'deterministic',
       limit: 10,
       ignoreCollections: []
     }
@@ -334,4 +361,288 @@ test('steam find similar ignores explicit seed collections case-insensitively fo
       ]
     }
   ]);
+});
+
+test('steam find similar official mode reorders enriched store candidates by official prioritization and appends unmatched candidates', async () => {
+  const harness = createToolHarness({
+    games: [
+      {
+        appId: 620,
+        name: 'Portal 2',
+        genres: ['Puzzle'],
+        tags: ['Co-op']
+      }
+    ],
+    selectedUserId: '76561198000000000',
+    prioritizedAppIds: [4, 3],
+    storeCandidates: [
+      {
+        appId: 3,
+        name: 'The Talos Principle',
+        storeUrl: 'https://store.steampowered.com/app/257510'
+      },
+      {
+        appId: 4,
+        name: 'Q.U.B.E. 2',
+        storeUrl: 'https://store.steampowered.com/app/359100'
+      },
+      {
+        appId: 5,
+        name: 'Unranked Candidate',
+        storeUrl: 'https://store.steampowered.com/app/5/'
+      }
+    ]
+  });
+
+  const result = await harness.invoke({
+    seedAppIds: [620],
+    query: 'Portal 2',
+    scope: 'store',
+    mode: 'official',
+    limit: 10
+  });
+
+  assert.deepEqual(parseFirstTextContent(result), [
+    {
+      item: {
+        appId: 4,
+        name: 'Q.U.B.E. 2',
+        storeUrl: 'https://store.steampowered.com/app/359100'
+      },
+      score: 3,
+      reasons: ['official store prioritization']
+    },
+    {
+      item: {
+        appId: 3,
+        name: 'The Talos Principle',
+        storeUrl: 'https://store.steampowered.com/app/257510'
+      },
+      score: 2,
+      reasons: ['official store prioritization']
+    },
+    {
+      item: {
+        appId: 5,
+        name: 'Unranked Candidate',
+        storeUrl: 'https://store.steampowered.com/app/5/'
+      },
+      score: 0,
+      reasons: ['official store prioritization unavailable for this candidate']
+    }
+  ]);
+  assert.deepEqual(harness.calls.prioritizeAppsForUser, [
+    {
+      appIds: [3, 4, 5],
+      steamId: '76561198000000000',
+      includeOwnedGames: true
+    }
+  ]);
+  assert.equal(harness.calls.discover, 1);
+  assert.deepEqual(harness.calls.rankSimilarStoreCandidates, []);
+});
+
+test('steam find similar official mode keeps library deterministic and only changes store ordering for scope both', async () => {
+  const harness = createToolHarness({
+    games: [
+      {
+        appId: 620,
+        name: 'Portal 2',
+        genres: ['Puzzle'],
+        tags: ['Co-op']
+      }
+    ],
+    selectedUserId: '76561198000000000',
+    prioritizedAppIds: [4],
+    libraryMatches: [
+      {
+        item: {
+          appId: 620,
+          name: 'Portal 2'
+        },
+        score: 10,
+        reasons: ['deterministic overlap']
+      }
+    ],
+    storeCandidates: [
+      {
+        appId: 4,
+        name: 'Q.U.B.E. 2',
+        storeUrl: 'https://store.steampowered.com/app/359100'
+      }
+    ]
+  });
+
+  const result = await harness.invoke({
+    seedAppIds: [620],
+    query: 'Portal 2',
+    scope: 'both',
+    mode: 'official',
+    limit: 10
+  });
+
+  assert.deepEqual(parseFirstTextContent(result), {
+    library: [
+      {
+        item: {
+          appId: 620,
+          name: 'Portal 2'
+        },
+        score: 10,
+        reasons: ['deterministic overlap']
+      }
+    ],
+    store: [
+      {
+        item: {
+          appId: 4,
+          name: 'Q.U.B.E. 2',
+          storeUrl: 'https://store.steampowered.com/app/359100'
+        },
+        score: 1,
+        reasons: ['official store prioritization']
+      }
+    ]
+  });
+  assert.deepEqual(harness.calls.rankSimilarLibraryGames, [
+    {
+      seedAppIds: [620],
+      query: 'Portal 2',
+      scope: 'both',
+      mode: 'official',
+      limit: 10,
+      ignoreCollections: []
+    }
+  ]);
+  assert.deepEqual(harness.calls.rankSimilarStoreCandidates, []);
+});
+
+test('steam find similar official mode rejects library-only scope', async () => {
+  const harness = createToolHarness({
+    games: []
+  });
+
+  const result = await harness.invoke({
+    scope: 'library',
+    mode: 'official'
+  });
+
+  assert.deepEqual(parseFirstTextContent(result), {
+    error: 'steam_find_similar mode="official" requires scope="store" or scope="both".'
+  });
+});
+
+test('steam find similar official mode returns explicit error when no selected user is discoverable', async () => {
+  const harness = createToolHarness({
+    games: [
+      {
+        appId: 620,
+        name: 'Portal 2'
+      }
+    ],
+    storeCandidates: [
+      {
+        appId: 3,
+        name: 'The Talos Principle',
+        storeUrl: 'https://store.steampowered.com/app/257510'
+      }
+    ]
+  });
+
+  const result = await harness.invoke({
+    seedAppIds: [620],
+    query: 'Portal 2',
+    scope: 'store',
+    mode: 'official'
+  });
+
+  assert.deepEqual(parseFirstTextContent(result), {
+    error: 'No selected Steam user was found; steam_find_similar mode="official" requires a discoverable selected user.'
+  });
+  assert.deepEqual(harness.calls.prioritizeAppsForUser, []);
+});
+
+test('steam find similar official mode returns explicit error when selected user cannot resolve to SteamID64', async () => {
+  const harness = createToolHarness({
+    games: [
+      {
+        appId: 620,
+        name: 'Portal 2'
+      }
+    ],
+    selectedUserId: 'not-a-steam-id',
+    storeCandidates: [
+      {
+        appId: 3,
+        name: 'The Talos Principle',
+        storeUrl: 'https://store.steampowered.com/app/257510'
+      }
+    ]
+  });
+
+  const result = await harness.invoke({
+    seedAppIds: [620],
+    query: 'Portal 2',
+    scope: 'store',
+    mode: 'official'
+  });
+
+  assert.deepEqual(parseFirstTextContent(result), {
+    error: 'The selected Steam user could not be resolved to a SteamID64; steam_find_similar mode="official" requires a valid SteamID64.'
+  });
+  assert.deepEqual(harness.calls.prioritizeAppsForUser, []);
+});
+
+test('steam find similar official mode surfaces official client failures as explicit errors', async () => {
+  const harness = createToolHarness({
+    games: [
+      {
+        appId: 620,
+        name: 'Portal 2'
+      }
+    ],
+    selectedUserId: '76561198000000000',
+    officialPrioritizeError: new Error('Steam Web API key is required for official store similarity access. Set STEAM_API_KEY.'),
+    storeCandidates: [
+      {
+        appId: 3,
+        name: 'The Talos Principle',
+        storeUrl: 'https://store.steampowered.com/app/257510'
+      }
+    ]
+  });
+
+  const result = await harness.invoke({
+    seedAppIds: [620],
+    query: 'Portal 2',
+    scope: 'store',
+    mode: 'official'
+  });
+
+  assert.deepEqual(parseFirstTextContent(result), {
+    error: 'Steam Web API key is required for official store similarity access. Set STEAM_API_KEY.'
+  });
+});
+
+test('steam find similar official mode skips official client when no store search query can be derived', async () => {
+  const harness = createToolHarness({
+    games: [
+      {
+        appId: 620,
+        name: 'Portal 2'
+      }
+    ],
+    selectedUserId: '76561198000000000'
+  });
+
+  const result = await harness.invoke({
+    query: '   ',
+    scope: 'store',
+    mode: 'official'
+  });
+
+  assert.deepEqual(parseFirstTextContent(result), []);
+  assert.deepEqual(harness.calls.searchLibrary, []);
+  assert.deepEqual(harness.calls.storeSearch, []);
+  assert.deepEqual(harness.calls.prioritizeAppsForUser, []);
 });

@@ -184,6 +184,7 @@ export interface SimilarRequest {
   seedAppIds?: number[];
   query?: string;
   scope?: 'library' | 'store' | 'both';
+  mode?: 'deterministic' | 'official';
   deckStatuses?: DeckStatus[];
   limit?: number;
   ignoreCollections?: string[];

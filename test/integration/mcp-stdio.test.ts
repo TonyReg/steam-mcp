@@ -23,12 +23,16 @@ async function writeOwnedGamesFetchPreload(
   fixtureRoot: string,
   appIds: number[],
   appDetailsPayloadById: Record<number, string> = {},
-  recentlyPlayedGames: Array<Record<string, unknown>> = []
+  recentlyPlayedGames: Array<Record<string, unknown>> = [],
+  storeSearchItems: Array<Record<string, unknown>> = [],
+  prioritizedAppIds: number[] = []
 ): Promise<string> {
   const preloadPath = createPreloadPath(fixtureRoot);
   const script = `const ownedGames = ${JSON.stringify(appIds)};
 const appDetailsPayloadById = ${JSON.stringify(appDetailsPayloadById)};
 const recentlyPlayedGames = ${JSON.stringify(recentlyPlayedGames)};
+const storeSearchItems = ${JSON.stringify(storeSearchItems)};
+const prioritizedAppIds = ${JSON.stringify(prioritizedAppIds)};
 const originalFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = async (input, init) => {
   const url = new URL(String(input));
@@ -48,6 +52,20 @@ globalThis.fetch = async (input, init) => {
         total_count: recentlyPlayedGames.length,
         games: recentlyPlayedGames
       }
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+
+  if (url.hostname === 'api.steampowered.com' && url.pathname === '/IStoreAppSimilarityService/PrioritizeAppsForUser/v1/') {
+    return new Response(JSON.stringify({
+      response: {
+        ids: prioritizedAppIds.map((appId) => ({ appid: appId }))
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+
+  if (url.hostname === 'store.steampowered.com' && url.pathname === '/api/storesearch/') {
+    return new Response(JSON.stringify({
+      items: storeSearchItems
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
 
@@ -406,6 +424,82 @@ test('stdio server returns recently played games through preload-patched GetRece
         playtimeForever: 240,
         iconUrl: 'icon-620'
       }
+    ]);
+  } finally {
+    await client.close();
+  }
+});
+
+test('stdio server reorders steam_find_similar store matches in official mode through preload-patched store search and official prioritization', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  fixture.env.STEAM_API_KEY = 'test-key';
+  const appDetails620 = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-620.json'), 'utf8');
+  const appDetails2051120 = await readFile(path.join(repoRoot, 'fixtures', 'steam', 'store', 'appdetails-2051120.json'), 'utf8');
+  const preloadPath = await writeOwnedGamesFetchPreload(
+    fixture.rootDir,
+    [620],
+    {
+      620: appDetails620,
+      2051120: appDetails2051120
+    },
+    [],
+    [
+      {
+        id: 620,
+        name: 'Portal 2',
+        developers: ['Valve'],
+        publishers: ['Valve'],
+        genres: ['Puzzle'],
+        tags: ['Co-op'],
+        is_free: false,
+        tiny_image: 'https://cdn.example/portal2.jpg'
+      },
+      {
+        id: 2051120,
+        name: 'Split Fiction',
+        developers: ['Hazelight Studios'],
+        publishers: ['Electronic Arts'],
+        genres: ['Action', 'Adventure'],
+        tags: ['Co-op'],
+        is_free: false,
+        tiny_image: 'https://cdn.example/split-fiction.jpg'
+      }
+    ],
+    [2051120, 620]
+  );
+  fixture.env.NODE_OPTIONS = [fixture.env.NODE_OPTIONS, `--import=${pathToFileURL(preloadPath).href}`].filter(Boolean).join(' ');
+
+  const client = new Client({ name: 'steam-mcp-test-client-similar-official', version: '0.1.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(repoRoot, 'packages', 'steam-mcp', 'dist', 'index.js')],
+    cwd: repoRoot,
+    env: fixture.env,
+    stderr: 'pipe'
+  });
+
+  await client.connect(transport);
+
+  try {
+    const result = await client.callTool({
+      name: 'steam_find_similar',
+      arguments: {
+        seedAppIds: [620],
+        query: 'Portal 2',
+        scope: 'store',
+        mode: 'official',
+        limit: 10
+      }
+    });
+    const payload = parseFirstTextContent(result) as Array<{
+      item: { appId: number };
+      reasons: string[];
+    }>;
+    assert.deepEqual(payload.map((match) => match.item.appId), [2051120, 620]);
+    assert.deepEqual(payload.map((match) => match.reasons), [
+      ['official store prioritization'],
+      ['official store prioritization']
     ]);
   } finally {
     await client.close();
