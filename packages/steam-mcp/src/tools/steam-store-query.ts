@@ -34,9 +34,17 @@ function getStoreQueryCandidateLimit(limit: number): number {
   return Math.min(100, Math.max(limit, limit * STORE_QUERY_OVERFETCH_MULTIPLIER));
 }
 
+function canonicalizeFacetValue(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
 function normalizeFacetFilter(values: string[] | undefined): string[] | undefined {
   const normalized = values
-    ?.map((value) => value.trim().toLowerCase())
+    ?.map(canonicalizeFacetValue)
     .filter((value): value is string => value.length > 0);
 
   return normalized && normalized.length > 0 ? normalized : undefined;
@@ -70,7 +78,7 @@ function matchesFacetFamily(expected: string[] | undefined, actual: string[]): b
     return true;
   }
 
-  const normalizedActual = new Set(actual.map((value) => value.trim().toLowerCase()).filter((value) => value.length > 0));
+  const normalizedActual = new Set(actual.map(canonicalizeFacetValue).filter((value) => value.length > 0));
   return expected.some((value) => normalizedActual.has(value));
 }
 
@@ -79,7 +87,7 @@ function matchesExcludedFacetFamily(excluded: string[] | undefined, actual: stri
     return false;
   }
 
-  const normalizedActual = new Set(actual.map((value) => value.trim().toLowerCase()).filter((value) => value.length > 0));
+  const normalizedActual = new Set(actual.map(canonicalizeFacetValue).filter((value) => value.length > 0));
   return excluded.some((value) => normalizedActual.has(value));
 }
 

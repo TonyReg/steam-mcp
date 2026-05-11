@@ -261,6 +261,44 @@ test('steam store query overfetches before authoritative genre filtering', async
   ]);
 });
 
+test('steam store query matches include facet variants after canonicalization', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [
+        createOfficialItem({ appId: 90, name: 'Canonical Match', storeUrl: 'https://store.steampowered.com/app/90/' }),
+        createOfficialItem({ appId: 92, name: 'Filtered Out', storeUrl: 'https://store.steampowered.com/app/92/' })
+      ]
+    },
+    cacheableDetailsByAppId: {
+      90: createCacheableDetails({
+        appId: 90,
+        name: 'Canonical Match',
+        tags: ['Single-player'],
+        categories: ['Local Co-op'],
+        storeUrl: 'https://store.steampowered.com/app/90/'
+      }),
+      92: createCacheableDetails({
+        appId: 92,
+        name: 'Filtered Out',
+        tags: ['Roguelike'],
+        categories: ['Online Co-op'],
+        storeUrl: 'https://store.steampowered.com/app/92/'
+      })
+    }
+  });
+
+  const result = await harness.invoke({
+    tags: ['single player'],
+    categories: ['local co op']
+  });
+
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [90, 92]);
+  assert.deepEqual(parseFirstTextContent(result), [
+    { appId: 90, name: 'Canonical Match', storeUrl: 'https://store.steampowered.com/app/90/' }
+  ]);
+});
+
 test('steam store query applies OR within families and AND across categories and tags', async () => {
   const harness = createToolHarness({
     queryItemsResult: {
@@ -413,6 +451,38 @@ test('steam store query excludes candidates whose authoritative tags match tagsE
   ]);
 });
 
+test('steam store query matches exclude facet variants after canonicalization', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [
+        createOfficialItem({ appId: 93, name: 'Early Access Match', storeUrl: 'https://store.steampowered.com/app/93/' }),
+        createOfficialItem({ appId: 94, name: 'Allowed Result', storeUrl: 'https://store.steampowered.com/app/94/' })
+      ]
+    },
+    cacheableDetailsByAppId: {
+      93: createCacheableDetails({
+        appId: 93,
+        name: 'Early Access Match',
+        tags: ['Early Access'],
+        storeUrl: 'https://store.steampowered.com/app/93/'
+      }),
+      94: createCacheableDetails({
+        appId: 94,
+        name: 'Allowed Result',
+        tags: ['Puzzle'],
+        storeUrl: 'https://store.steampowered.com/app/94/'
+      })
+    }
+  });
+
+  const result = await harness.invoke({ tagsExclude: ['early-access'] });
+
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
+  assert.deepEqual(parseFirstTextContent(result), [
+    { appId: 94, name: 'Allowed Result', storeUrl: 'https://store.steampowered.com/app/94/' }
+  ]);
+});
+
 test('steam store query composes include and exclude facet filters', async () => {
   const harness = createToolHarness({
     queryItemsResult: {
@@ -455,6 +525,46 @@ test('steam store query composes include and exclude facet filters', async () =>
   assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
   assert.deepEqual(parseFirstTextContent(result), [
     { appId: 50, name: 'Allowed Co-op', storeUrl: 'https://store.steampowered.com/app/50/' }
+  ]);
+});
+
+test('steam store query preserves OR semantics within a facet family after canonicalization', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [
+        createOfficialItem({ appId: 95, name: 'Single-player Match', storeUrl: 'https://store.steampowered.com/app/95/' }),
+        createOfficialItem({ appId: 96, name: 'Local Co-op Match', storeUrl: 'https://store.steampowered.com/app/96/' }),
+        createOfficialItem({ appId: 97, name: 'No Match', storeUrl: 'https://store.steampowered.com/app/97/' })
+      ]
+    },
+    cacheableDetailsByAppId: {
+      95: createCacheableDetails({
+        appId: 95,
+        name: 'Single-player Match',
+        categories: ['Single-player'],
+        storeUrl: 'https://store.steampowered.com/app/95/'
+      }),
+      96: createCacheableDetails({
+        appId: 96,
+        name: 'Local Co-op Match',
+        categories: ['Local Co-op'],
+        storeUrl: 'https://store.steampowered.com/app/96/'
+      }),
+      97: createCacheableDetails({
+        appId: 97,
+        name: 'No Match',
+        categories: ['Controller Support'],
+        storeUrl: 'https://store.steampowered.com/app/97/'
+      })
+    }
+  });
+
+  const result = await harness.invoke({ categories: ['single player', 'local co op'] });
+
+  assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
+  assert.deepEqual(parseFirstTextContent(result), [
+    { appId: 95, name: 'Single-player Match', storeUrl: 'https://store.steampowered.com/app/95/' },
+    { appId: 96, name: 'Local Co-op Match', storeUrl: 'https://store.steampowered.com/app/96/' }
   ]);
 });
 
