@@ -24,8 +24,15 @@ type StoreQueryResultMetadata = {
   authoritativeFacetFiltering: boolean;
 };
 
+type StoreQueryResultFacets = {
+  genres: string[];
+  categories: string[];
+  tags: string[];
+};
+
 type StoreQueryResultItem = OfficialStoreItemSummary & {
   metadata?: StoreQueryResultMetadata;
+  facets?: StoreQueryResultFacets;
 };
 
 function parseFirstTextContent(result: ToolResult): unknown {
@@ -43,7 +50,7 @@ function parseStoreQueryItems(result: ToolResult): StoreQueryResultItem[] {
 }
 
 function stripStoreQueryMetadata(items: StoreQueryResultItem[]): OfficialStoreItemSummary[] {
-  return items.map(({ metadata: _metadata, ...item }) => item);
+  return items.map(({ metadata: _metadata, facets: _facets, ...item }) => item);
 }
 
 function createOfficialItem({
@@ -260,6 +267,60 @@ test('steam store query preserves omitted args so official client defaults apply
   ]);
 });
 
+test('steam store query enriches passthrough results with opt-in facets without dropping lookup misses', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [
+        createOfficialItem({ appId: 620, name: 'Portal 2', storeUrl: 'https://store.steampowered.com/app/620/' }),
+        createOfficialItem({ appId: 621, name: 'Missed Details', storeUrl: 'https://store.steampowered.com/app/621/' }),
+        createOfficialItem({ appId: 622, name: 'Lookup Error', storeUrl: 'https://store.steampowered.com/app/622/' })
+      ]
+    },
+    cacheableDetailsByAppId: {
+      620: createCacheableDetails({
+        appId: 620,
+        name: 'Portal 2',
+        genres: ['Puzzle'],
+        categories: ['Single-player'],
+        tags: ['Story Rich'],
+        storeUrl: 'https://store.steampowered.com/app/620/'
+      }),
+      621: undefined
+    },
+    cacheableDetailsErrorByAppId: {
+      622: new Error('details failed')
+    }
+  });
+
+  const result = await harness.invoke({
+    types: ['game'],
+    includeFacets: true
+  });
+
+  assert.deepEqual(harness.calls.queryItems, [{
+    types: ['game']
+  }]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [620, 621, 622]);
+  const items = parseStoreQueryItems(result);
+  assert.deepEqual(items[0]?.metadata, {
+    source: 'query',
+    filtersApplied: ['types:game'],
+    authoritativeFacetFiltering: false
+  });
+  assert.deepEqual(items[0]?.facets, {
+    genres: ['Puzzle'],
+    categories: ['Single-player'],
+    tags: ['Story Rich']
+  });
+  assert.equal(items[1]?.facets, undefined);
+  assert.equal(items[2]?.facets, undefined);
+  assert.deepEqual(stripStoreQueryMetadata(items), [
+    { appId: 620, name: 'Portal 2', storeUrl: 'https://store.steampowered.com/app/620/' },
+    { appId: 621, name: 'Missed Details', storeUrl: 'https://store.steampowered.com/app/621/' },
+    { appId: 622, name: 'Lookup Error', storeUrl: 'https://store.steampowered.com/app/622/' }
+  ]);
+});
+
 test('steam store query overfetches before authoritative genre filtering', async () => {
   const harness = createToolHarness({
     queryItemsResult: {
@@ -305,6 +366,72 @@ test('steam store query overfetches before authoritative genre filtering', async
     ],
     authoritativeFacetFiltering: true
   });
+  assert.deepEqual(stripStoreQueryMetadata(items), [
+    { appId: 1, name: 'Alpha', storeUrl: 'https://store.steampowered.com/app/1/' },
+    { appId: 3, name: 'Gamma', storeUrl: 'https://store.steampowered.com/app/3/' }
+  ]);
+});
+
+test('steam store query reuses authoritative detail lookups for opt-in facets', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [
+        createOfficialItem({ appId: 1, name: 'Alpha', storeUrl: 'https://store.steampowered.com/app/1/' }),
+        createOfficialItem({ appId: 2, name: 'Beta', storeUrl: 'https://store.steampowered.com/app/2/' }),
+        createOfficialItem({ appId: 3, name: 'Gamma', storeUrl: 'https://store.steampowered.com/app/3/' })
+      ]
+    },
+    cacheableDetailsByAppId: {
+      1: createCacheableDetails({
+        appId: 1,
+        name: 'Alpha',
+        genres: ['Puzzle'],
+        categories: ['Single-player'],
+        tags: ['Story Rich'],
+        storeUrl: 'https://store.steampowered.com/app/1/'
+      }),
+      2: createCacheableDetails({
+        appId: 2,
+        name: 'Beta',
+        genres: ['Action'],
+        categories: ['Co-op'],
+        tags: ['Action'],
+        storeUrl: 'https://store.steampowered.com/app/2/'
+      }),
+      3: createCacheableDetails({
+        appId: 3,
+        name: 'Gamma',
+        genres: ['Puzzle'],
+        categories: ['Local Co-op'],
+        tags: ['Co-op'],
+        storeUrl: 'https://store.steampowered.com/app/3/'
+      })
+    }
+  });
+
+  const result = await harness.invoke({
+    limit: 2,
+    genres: ['puzzle'],
+    includeFacets: true
+  });
+
+  assert.deepEqual(harness.calls.queryItems, [{
+    limit: 6
+  }]);
+  assert.deepEqual(harness.calls.getCacheableAppDetails, [1, 2, 3]);
+  const items = parseStoreQueryItems(result);
+  assert.deepEqual(items.map((item) => item.facets), [
+    {
+      genres: ['Puzzle'],
+      categories: ['Single-player'],
+      tags: ['Story Rich']
+    },
+    {
+      genres: ['Puzzle'],
+      categories: ['Local Co-op'],
+      tags: ['Co-op']
+    }
+  ]);
   assert.deepEqual(stripStoreQueryMetadata(items), [
     { appId: 1, name: 'Alpha', storeUrl: 'https://store.steampowered.com/app/1/' },
     { appId: 3, name: 'Gamma', storeUrl: 'https://store.steampowered.com/app/3/' }

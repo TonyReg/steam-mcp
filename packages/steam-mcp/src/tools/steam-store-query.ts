@@ -19,6 +19,7 @@ const steamStoreQueryInputShape = {
   countryCode: z.string().min(1).optional(),
   comingSoonOnly: z.boolean().optional(),
   freeToPlay: z.boolean().optional(),
+  includeFacets: z.boolean().optional(),
   genres: z.array(z.string().min(1)).optional(),
   categories: z.array(z.string().min(1)).optional(),
   tags: z.array(z.string().min(1)).optional(),
@@ -38,8 +39,20 @@ type SteamStoreQueryMetadata = {
   authoritativeFacetFiltering: boolean;
 };
 
+type SteamStoreQueryFacets = {
+  genres: string[];
+  categories: string[];
+  tags: string[];
+};
+
 type SteamStoreQueryResultItem = OfficialStoreItemSummary & {
   metadata: SteamStoreQueryMetadata;
+  facets?: SteamStoreQueryFacets;
+};
+
+type SteamStoreQueryFacetMatch = {
+  item: OfficialStoreItemSummary;
+  details: StoreAppDetails;
 };
 
 function appendAppliedFilter(
@@ -146,6 +159,14 @@ function buildStoreQueryMetadata(
   };
 }
 
+function buildStoreQueryFacets(details: StoreAppDetails): SteamStoreQueryFacets {
+  return {
+    genres: [...details.genres],
+    categories: [...details.categories],
+    tags: [...details.tags]
+  };
+}
+
 function attachStoreQueryMetadata(
   items: OfficialStoreItemSummary[],
   metadata: SteamStoreQueryMetadata
@@ -157,6 +178,23 @@ function attachStoreQueryMetadata(
       filtersApplied: [...metadata.filtersApplied]
     }
   }));
+}
+
+function attachStoreQueryFacets(
+  items: SteamStoreQueryResultItem[],
+  detailsByAppId: ReadonlyMap<number, StoreAppDetails>
+): SteamStoreQueryResultItem[] {
+  return items.map((item) => {
+    const details = detailsByAppId.get(item.appId);
+    if (!details) {
+      return item;
+    }
+
+    return {
+      ...item,
+      facets: buildStoreQueryFacets(details)
+    };
+  });
 }
 
 function matchesFacetFamily(expected: string[] | undefined, actual: string[]): boolean {
@@ -204,8 +242,8 @@ async function filterItemsByCacheableFacets(
   genresExclude: string[] | undefined,
   categoriesExclude: string[] | undefined,
   tagsExclude: string[] | undefined
-): Promise<OfficialStoreItemSummary[]> {
-  const matches: OfficialStoreItemSummary[] = [];
+): Promise<SteamStoreQueryFacetMatch[]> {
+  const matches: SteamStoreQueryFacetMatch[] = [];
 
   for (const item of items) {
     let details: StoreAppDetails | undefined;
@@ -224,7 +262,7 @@ async function filterItemsByCacheableFacets(
       continue;
     }
 
-    matches.push(item);
+    matches.push({ item, details });
     if (limit !== undefined && matches.length >= limit) {
       break;
     }
@@ -233,13 +271,33 @@ async function filterItemsByCacheableFacets(
   return matches;
 }
 
+async function enrichItemsWithOptionalFacets(
+  context: SteamMcpContext,
+  items: SteamStoreQueryResultItem[]
+): Promise<SteamStoreQueryResultItem[]> {
+  const detailsByAppId = new Map<number, StoreAppDetails>();
+
+  for (const item of items) {
+    try {
+      const details = await context.storeClient.getCacheableAppDetails(item.appId);
+      if (details) {
+        detailsByAppId.set(item.appId, details);
+      }
+    } catch {
+      // Best-effort passthrough enrichment should not drop items.
+    }
+  }
+
+  return attachStoreQueryFacets(items, detailsByAppId);
+}
+
 export function registerSteamStoreQueryTool(server: McpServer, context: SteamMcpContext): void {
   registerToolShallow(
     server,
     'steam_store_query',
     {
       title: 'Steam store query',
-      description: 'Query the authenticated official Steam catalog with type, release-state, free-to-play, and human-readable genre/category/tag include and exclude filters. Read-only and Steam Web API key dependent.',
+      description: 'Query the authenticated official Steam catalog with type, release-state, free-to-play, and human-readable genre/category/tag include and exclude filters, plus optional facet enrichment. Read-only and Steam Web API key dependent.',
       inputSchema: steamStoreQueryInputSchema
     },
     async (rawArgs) => {
@@ -272,8 +330,12 @@ export function registerSteamStoreQueryTool(server: McpServer, context: SteamMcp
       try {
         if (!requiresFacetFiltering) {
           const result = await context.officialStoreClient.queryItems(buildOfficialStoreQueryArgs(args));
+          const metadataItems = attachStoreQueryMetadata(result.items, metadata);
+          const responseItems = args.includeFacets
+            ? await enrichItemsWithOptionalFacets(context, metadataItems)
+            : metadataItems;
           return {
-            content: [{ type: 'text', text: JSON.stringify(attachStoreQueryMetadata(result.items, metadata), null, 2) }]
+            content: [{ type: 'text', text: JSON.stringify(responseItems, null, 2) }]
           };
         }
 
@@ -283,7 +345,7 @@ export function registerSteamStoreQueryTool(server: McpServer, context: SteamMcp
             getStoreQueryCandidateLimit(args.limit ?? 20)
           )
         );
-        const filteredItems = await filterItemsByCacheableFacets(
+        const filteredMatches = await filterItemsByCacheableFacets(
           context,
           result.items,
           args.limit,
@@ -294,9 +356,19 @@ export function registerSteamStoreQueryTool(server: McpServer, context: SteamMcp
           normalizedCategoriesExclude,
           normalizedTagsExclude
         );
+        const metadataItems = attachStoreQueryMetadata(
+          filteredMatches.map(({ item }) => item),
+          metadata
+        );
+        const responseItems = args.includeFacets
+          ? attachStoreQueryFacets(
+              metadataItems,
+              new Map(filteredMatches.map(({ item, details }) => [item.appId, details]))
+            )
+          : metadataItems;
 
         return {
-          content: [{ type: 'text', text: JSON.stringify(attachStoreQueryMetadata(filteredItems, metadata), null, 2) }]
+          content: [{ type: 'text', text: JSON.stringify(responseItems, null, 2) }]
         };
       } catch (error) {
         return {
