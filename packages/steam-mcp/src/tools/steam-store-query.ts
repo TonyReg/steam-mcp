@@ -32,6 +32,26 @@ const steamStoreQueryInputSchema: Record<string, z.ZodTypeAny> = steamStoreQuery
 
 type SteamStoreQueryArgs = z.infer<typeof steamStoreQueryArgsSchema>;
 
+type SteamStoreQueryMetadata = {
+  source: 'query';
+  filtersApplied: string[];
+  authoritativeFacetFiltering: boolean;
+};
+
+type SteamStoreQueryResultItem = OfficialStoreItemSummary & {
+  metadata: SteamStoreQueryMetadata;
+};
+
+function appendAppliedFilter(
+  filtersApplied: string[],
+  key: string,
+  values: readonly string[] | undefined
+): void {
+  if (values && values.length > 0) {
+    filtersApplied.push(`${key}:${values.join(',')}`);
+  }
+}
+
 function getStoreQueryCandidateLimit(limit: number): number {
   return Math.min(100, Math.max(limit, limit * STORE_QUERY_OVERFETCH_MULTIPLIER));
 }
@@ -81,6 +101,62 @@ function buildOfficialStoreQueryArgs(args: SteamStoreQueryArgs, limitOverride?: 
   }
 
   return request;
+}
+
+function buildStoreQueryMetadata(
+  args: SteamStoreQueryArgs,
+  genres: string[] | undefined,
+  categories: string[] | undefined,
+  tags: string[] | undefined,
+  genresExclude: string[] | undefined,
+  categoriesExclude: string[] | undefined,
+  tagsExclude: string[] | undefined,
+  authoritativeFacetFiltering: boolean
+): SteamStoreQueryMetadata {
+  const filtersApplied: string[] = [];
+
+  appendAppliedFilter(filtersApplied, 'types', args.types);
+  if (args.language !== undefined) {
+    filtersApplied.push(`language:${args.language}`);
+  }
+
+  if (args.countryCode !== undefined) {
+    filtersApplied.push(`countryCode:${args.countryCode}`);
+  }
+
+  if (args.comingSoonOnly !== undefined) {
+    filtersApplied.push(`comingSoonOnly:${args.comingSoonOnly}`);
+  }
+
+  if (args.freeToPlay !== undefined) {
+    filtersApplied.push(`freeToPlay:${args.freeToPlay}`);
+  }
+
+  appendAppliedFilter(filtersApplied, 'genres', genres);
+  appendAppliedFilter(filtersApplied, 'categories', categories);
+  appendAppliedFilter(filtersApplied, 'tags', tags);
+  appendAppliedFilter(filtersApplied, 'genresExclude', genresExclude);
+  appendAppliedFilter(filtersApplied, 'categoriesExclude', categoriesExclude);
+  appendAppliedFilter(filtersApplied, 'tagsExclude', tagsExclude);
+
+  return {
+    source: 'query',
+    filtersApplied,
+    authoritativeFacetFiltering
+  };
+}
+
+function attachStoreQueryMetadata(
+  items: OfficialStoreItemSummary[],
+  metadata: SteamStoreQueryMetadata
+): SteamStoreQueryResultItem[] {
+  return items.map((item) => ({
+    ...item,
+    metadata: {
+      ...metadata,
+      filtersApplied: [...metadata.filtersApplied]
+    }
+  }));
 }
 
 function matchesFacetFamily(expected: string[] | undefined, actual: string[]): boolean {
@@ -182,12 +258,22 @@ export function registerSteamStoreQueryTool(server: McpServer, context: SteamMcp
         || normalizedCategoriesExclude
         || normalizedTagsExclude
       );
+      const metadata = buildStoreQueryMetadata(
+        args,
+        normalizedGenres,
+        normalizedCategories,
+        normalizedTags,
+        normalizedGenresExclude,
+        normalizedCategoriesExclude,
+        normalizedTagsExclude,
+        requiresFacetFiltering
+      );
 
       try {
         if (!requiresFacetFiltering) {
           const result = await context.officialStoreClient.queryItems(buildOfficialStoreQueryArgs(args));
           return {
-            content: [{ type: 'text', text: JSON.stringify(result.items, null, 2) }]
+            content: [{ type: 'text', text: JSON.stringify(attachStoreQueryMetadata(result.items, metadata), null, 2) }]
           };
         }
 
@@ -210,7 +296,7 @@ export function registerSteamStoreQueryTool(server: McpServer, context: SteamMcp
         );
 
         return {
-          content: [{ type: 'text', text: JSON.stringify(filteredItems, null, 2) }]
+          content: [{ type: 'text', text: JSON.stringify(attachStoreQueryMetadata(filteredItems, metadata), null, 2) }]
         };
       } catch (error) {
         return {

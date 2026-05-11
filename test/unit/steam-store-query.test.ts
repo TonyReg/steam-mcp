@@ -18,12 +18,32 @@ type ToolResult = {
 
 type RegisteredToolHandler = (rawArgs: unknown) => ToolResult | Promise<ToolResult>;
 
+type StoreQueryResultMetadata = {
+  source: 'query';
+  filtersApplied: string[];
+  authoritativeFacetFiltering: boolean;
+};
+
+type StoreQueryResultItem = OfficialStoreItemSummary & {
+  metadata?: StoreQueryResultMetadata;
+};
+
 function parseFirstTextContent(result: ToolResult): unknown {
   const firstContent = result.content?.[0];
   assert.ok(firstContent);
   assert.equal(firstContent.type, 'text');
   assert.equal(typeof firstContent.text, 'string');
   return JSON.parse(firstContent.text ?? 'null');
+}
+
+function parseStoreQueryItems(result: ToolResult): StoreQueryResultItem[] {
+  const parsed = parseFirstTextContent(result);
+  assert.ok(Array.isArray(parsed));
+  return parsed as StoreQueryResultItem[];
+}
+
+function stripStoreQueryMetadata(items: StoreQueryResultItem[]): OfficialStoreItemSummary[] {
+  return items.map(({ metadata: _metadata, ...item }) => item);
 }
 
 function createOfficialItem({
@@ -168,7 +188,19 @@ test('steam store query preserves the passthrough path when no facet filters are
     freeToPlay: true
   }]);
   assert.deepEqual(harness.calls.getCacheableAppDetails, []);
-  assert.deepEqual(parseFirstTextContent(result), [
+  const items = parseStoreQueryItems(result);
+  assert.deepEqual(items[0]?.metadata, {
+    source: 'query',
+    filtersApplied: [
+      'types:game,dlc',
+      'language:german',
+      'countryCode:DE',
+      'comingSoonOnly:false',
+      'freeToPlay:true'
+    ],
+    authoritativeFacetFiltering: false
+  });
+  assert.deepEqual(stripStoreQueryMetadata(items), [
     {
       appId: 730,
       name: 'Counter-Strike 2',
@@ -215,7 +247,7 @@ test('steam store query preserves omitted args so official client defaults apply
 
   assert.deepEqual(harness.calls.queryItems, [{}]);
   assert.deepEqual(harness.calls.getCacheableAppDetails, []);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     {
       appId: 620,
       name: 'Portal 2',
@@ -263,7 +295,17 @@ test('steam store query overfetches before authoritative genre filtering', async
     countryCode: 'CN'
   }]);
   assert.deepEqual(harness.calls.getCacheableAppDetails, [1, 2, 3]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  const items = parseStoreQueryItems(result);
+  assert.deepEqual(items[0]?.metadata, {
+    source: 'query',
+    filtersApplied: [
+      'language:schinese',
+      'countryCode:CN',
+      'genres:puzzle'
+    ],
+    authoritativeFacetFiltering: true
+  });
+  assert.deepEqual(stripStoreQueryMetadata(items), [
     { appId: 1, name: 'Alpha', storeUrl: 'https://store.steampowered.com/app/1/' },
     { appId: 3, name: 'Gamma', storeUrl: 'https://store.steampowered.com/app/3/' }
   ]);
@@ -299,7 +341,7 @@ test('steam store query forwards locale passthrough through authoritative facet 
     countryCode: 'JP'
   }]);
   assert.deepEqual(harness.calls.getCacheableAppDetails, [81]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     { appId: 81, name: 'Locale Match', storeUrl: 'https://store.steampowered.com/app/81/' }
   ]);
 });
@@ -337,7 +379,7 @@ test('steam store query matches include facet variants after canonicalization', 
 
   assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
   assert.deepEqual(harness.calls.getCacheableAppDetails, [90, 92]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     { appId: 90, name: 'Canonical Match', storeUrl: 'https://store.steampowered.com/app/90/' }
   ]);
 });
@@ -392,7 +434,7 @@ test('steam store query applies OR within families and AND across categories and
   assert.deepEqual(harness.calls.queryItems, [{
     limit: 60
   }]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     { appId: 10, name: 'Match A', storeUrl: 'https://store.steampowered.com/app/10/' },
     { appId: 11, name: 'Match B', storeUrl: 'https://store.steampowered.com/app/11/' }
   ]);
@@ -420,7 +462,7 @@ test('steam store query excludes candidates with missing cacheable details when 
   const result = await harness.invoke({ genres: ['puzzle'] });
 
   assert.deepEqual(harness.calls.getCacheableAppDetails, [20, 21]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     { appId: 21, name: 'Present Details', storeUrl: 'https://store.steampowered.com/app/21/' }
   ]);
 });
@@ -449,7 +491,7 @@ test('steam store query excludes candidates when cacheable details lookup throws
   const result = await harness.invoke({ genres: ['puzzle'] });
 
   assert.deepEqual(harness.calls.getCacheableAppDetails, [30, 31]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     { appId: 31, name: 'Recovered Match', storeUrl: 'https://store.steampowered.com/app/31/' }
   ]);
 });
@@ -489,7 +531,7 @@ test('steam store query excludes candidates whose authoritative tags match tagsE
 
   assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
   assert.deepEqual(harness.calls.getCacheableAppDetails, [40, 41, 42]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     { appId: 41, name: 'Allowed Match', storeUrl: 'https://store.steampowered.com/app/41/' }
   ]);
 });
@@ -521,7 +563,7 @@ test('steam store query matches exclude facet variants after canonicalization', 
   const result = await harness.invoke({ tagsExclude: ['early-access'] });
 
   assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     { appId: 94, name: 'Allowed Result', storeUrl: 'https://store.steampowered.com/app/94/' }
   ]);
 });
@@ -566,7 +608,7 @@ test('steam store query composes include and exclude facet filters', async () =>
   });
 
   assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     { appId: 50, name: 'Allowed Co-op', storeUrl: 'https://store.steampowered.com/app/50/' }
   ]);
 });
@@ -605,7 +647,7 @@ test('steam store query preserves OR semantics within a facet family after canon
   const result = await harness.invoke({ categories: ['single player', 'local co op'] });
 
   assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     { appId: 95, name: 'Single-player Match', storeUrl: 'https://store.steampowered.com/app/95/' },
     { appId: 96, name: 'Local Co-op Match', storeUrl: 'https://store.steampowered.com/app/96/' }
   ]);
@@ -636,7 +678,7 @@ test('steam store query preserves the passthrough path when exclude arrays norma
 
   assert.deepEqual(harness.calls.queryItems, [{}]);
   assert.deepEqual(harness.calls.getCacheableAppDetails, []);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     {
       appId: 60,
       name: 'Portal 2',
@@ -708,7 +750,7 @@ test('steam store query overfetches when exclude filters are active', async () =
 
   assert.deepEqual(harness.calls.queryItems, [{ limit: 6 }]);
   assert.deepEqual(harness.calls.getCacheableAppDetails, [70, 71, 72]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     { appId: 71, name: 'Allowed First', storeUrl: 'https://store.steampowered.com/app/71/' },
     { appId: 72, name: 'Allowed Second', storeUrl: 'https://store.steampowered.com/app/72/' }
   ]);
@@ -741,7 +783,7 @@ test('steam store query still skips missing and failing detail lookups when excl
 
   assert.deepEqual(harness.calls.queryItems, [{ limit: 60 }]);
   assert.deepEqual(harness.calls.getCacheableAppDetails, [80, 81, 82]);
-  assert.deepEqual(parseFirstTextContent(result), [
+  assert.deepEqual(stripStoreQueryMetadata(parseStoreQueryItems(result)), [
     { appId: 82, name: 'Allowed Match', storeUrl: 'https://store.steampowered.com/app/82/' }
   ]);
 });
