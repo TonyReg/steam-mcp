@@ -17,7 +17,7 @@ Recommended flow:
 
 1. `steam_status`
 2. `steam_library_list` or `steam_library_search`
-3. `steam_find_similar` and/or `steam_store_search` when enrichment is needed; keep `steam_find_similar` deterministic by default and use `mode="official"` only for `scope="store"` or `scope="both"` when authenticated official prioritization is explicitly useful
+3. `steam_store_query`, `steam_store_search`, and/or `steam_find_similar` when enrichment or comparison is needed; use `steam_store_query` for authenticated official catalog filtering, `steam_store_search` for unauthenticated public-store lookup, keep `steam_find_similar` deterministic by default, and use `mode="official"` only for `scope="store"` or `scope="both"` when authenticated official prioritization is explicitly useful
 4. `steam_export` and `steam_link_generate`
 
 This workflow depends on API-authoritative owned-library enumeration through `GetOwnedGames`. If `steam_status` reports missing `STEAM_API_KEY`, stop and ask for configuration instead of relying on stale local data.
