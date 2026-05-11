@@ -48,6 +48,7 @@ type SteamStoreQueryFacets = {
 type SteamStoreQueryResultItem = OfficialStoreItemSummary & {
   metadata: SteamStoreQueryMetadata;
   facets?: SteamStoreQueryFacets;
+  facetsAvailable?: boolean;
 };
 
 type SteamStoreQueryFacetMatch = {
@@ -187,12 +188,16 @@ function attachStoreQueryFacets(
   return items.map((item) => {
     const details = detailsByAppId.get(item.appId);
     if (!details) {
-      return item;
+      return {
+        ...item,
+        facetsAvailable: false
+      };
     }
 
     return {
       ...item,
-      facets: buildStoreQueryFacets(details)
+      facets: buildStoreQueryFacets(details),
+      facetsAvailable: true
     };
   });
 }

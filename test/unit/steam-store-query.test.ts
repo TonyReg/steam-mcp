@@ -33,6 +33,7 @@ type StoreQueryResultFacets = {
 type StoreQueryResultItem = OfficialStoreItemSummary & {
   metadata?: StoreQueryResultMetadata;
   facets?: StoreQueryResultFacets;
+  facetsAvailable?: boolean;
 };
 
 function parseFirstTextContent(result: ToolResult): unknown {
@@ -50,7 +51,7 @@ function parseStoreQueryItems(result: ToolResult): StoreQueryResultItem[] {
 }
 
 function stripStoreQueryMetadata(items: StoreQueryResultItem[]): OfficialStoreItemSummary[] {
-  return items.map(({ metadata: _metadata, facets: _facets, ...item }) => item);
+  return items.map(({ metadata: _metadata, facets: _facets, facetsAvailable: _facetsAvailable, ...item }) => item);
 }
 
 function createOfficialItem({
@@ -312,8 +313,11 @@ test('steam store query enriches passthrough results with opt-in facets without 
     categories: ['Single-player'],
     tags: ['Story Rich']
   });
+  assert.equal(items[0]?.facetsAvailable, true);
   assert.equal(items[1]?.facets, undefined);
+  assert.equal(items[1]?.facetsAvailable, false);
   assert.equal(items[2]?.facets, undefined);
+  assert.equal(items[2]?.facetsAvailable, false);
   assert.deepEqual(stripStoreQueryMetadata(items), [
     { appId: 620, name: 'Portal 2', storeUrl: 'https://store.steampowered.com/app/620/' },
     { appId: 621, name: 'Missed Details', storeUrl: 'https://store.steampowered.com/app/621/' },
@@ -432,6 +436,7 @@ test('steam store query reuses authoritative detail lookups for opt-in facets', 
       tags: ['Co-op']
     }
   ]);
+  assert.deepEqual(items.map((item) => item.facetsAvailable), [true, true]);
   assert.deepEqual(stripStoreQueryMetadata(items), [
     { appId: 1, name: 'Alpha', storeUrl: 'https://store.steampowered.com/app/1/' },
     { appId: 3, name: 'Gamma', storeUrl: 'https://store.steampowered.com/app/3/' }
