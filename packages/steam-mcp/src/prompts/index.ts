@@ -99,10 +99,10 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               'Workflow:',
               '1. Call steam_status first and confirm the detected Steam user, whether Steam Web API access is available for owned-library enumeration, the collection backend, and whether collection writes are enabled.',
               '2. If steam_status reports that STEAM_API_KEY is unavailable, stop and tell the user the owned library cannot be enumerated until API-authoritative access is configured.',
-              '3. Use steam_library_list or steam_library_search to inspect the owned library. Add steam_store_search or steam_find_similar only when you need enrichment or comparison.',
+              '3. Use steam_library_list or steam_library_search to inspect the owned library. Add steam_store_search or steam_find_similar only when you need enrichment or comparison; keep steam_find_similar deterministic by default and use mode="official" only for store or both-scope ranking when authenticated official prioritization is explicitly useful.',
               '4. Use steam_export for JSON/Markdown handoff and steam_link_generate for store, community, library, or launch links.',
               '5. Stay read-only by default. If the user asks to reorganize categories, switch to the steam_collection_planner prompt before considering any write path.',
-              '6. Explain the reasoning for recommendations or filters in deterministic terms such as shared tags, genres, playtime, favorites, or Deck status.'
+              '6. Explain the reasoning for recommendations or filters in explicit terms such as shared tags, genres, playtime, favorites, Deck status, or official store prioritization when mode="official" was used.'
             ].join('\n')
           }
         }]
@@ -172,9 +172,9 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               '1. Call steam_status to confirm the environment, backend state, and whether Steam Web API access is available for owned-library enumeration.',
               '2. If steam_status reports that STEAM_API_KEY is unavailable, stop and tell the user the owned backlog cannot be enumerated until API-authoritative access is configured.',
               '3. Use steam_library_search with played=false and the requested deckStatuses filter to narrow the backlog.',
-              '4. Use steam_find_similar when you need to rank candidates by overlap with the user’s known favorites or recent play patterns.',
+              '4. Use steam_find_similar when you need to rank candidates by overlap with the user’s known favorites or recent play patterns; keep the default deterministic mode for backlog-first triage and use mode="official" only when store or both-scope ranking is explicitly needed and authenticated official prioritization is available.',
               '5. Use steam_export to produce a Markdown shortlist or JSON payload, and steam_link_generate to provide store/library/launch links for the finalists.',
-              '6. Keep the reasoning explicit and deterministic: Deck status, genres, tags, collections, favorites, hidden flags, and playtime.'
+              '6. Keep the reasoning explicit: Deck status, genres, tags, collections, favorites, hidden flags, playtime, and official store prioritization only when mode="official" was used.'
             ].join('\n')
           }
         }]
@@ -213,9 +213,9 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               '1. Call steam_status first and confirm the detected Steam user and whether the Steam Web API key is available in MCP runtime.',
               '2. Use steam_release_scout for the primary scouting pass. Keep the workflow read-only and do not fall back to any write path.',
               '3. When useful, pass freeToPlay=true or freeToPlay=false to narrow the official scout with the same boolean semantics used elsewhere in the MCP.',
-              '4. If the user wants deeper context on matches, use steam_store_search for comparison, steam_find_similar for deterministic library overlap, and steam_link_generate for store links.',
+              '4. If the user wants deeper context on matches, use steam_store_search for comparison, steam_find_similar for owned-library overlap or optional official store prioritization (only with mode="official", scope="store" or "both", and a resolvable selected user), and steam_link_generate for store links.',
               '5. Use steam_export when the user wants a JSON or Markdown handoff of the shortlisted releases.',
-              '6. Explain results in deterministic terms such as release status, app type, free-to-play state, store metadata, and how the shortlist was filtered by limit, types, comingSoonOnly, or freeToPlay.',
+              '6. Explain results in explicit terms such as release status, app type, free-to-play state, store metadata, and how the shortlist was filtered by limit, types, comingSoonOnly, freeToPlay, or optional official prioritization.',
               '7. If steam_status or steam_release_scout reports that the Steam Web API key is unavailable, tell the user that steam_release_scout requires `STEAM_API_KEY` and stop instead of improvising with unofficial substitutes.'
             ].join('\n')
           }

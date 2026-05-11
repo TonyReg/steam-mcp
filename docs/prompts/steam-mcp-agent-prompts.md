@@ -6,7 +6,7 @@ This repository exposes MCP prompts as the primary agent-facing workflow surface
 
 ### `steam_library_curator`
 
-Use this when an agent should analyze the owned Steam library safely, search for candidates, explain deterministic recommendations, export results, or generate `steam://` links.
+Use this when an agent should analyze the owned Steam library safely, search for candidates, explain recommendations grounded in deterministic overlap or optional official store prioritization, export results, or generate `steam://` links.
 
 Arguments:
 
@@ -17,7 +17,7 @@ Recommended flow:
 
 1. `steam_status`
 2. `steam_library_list` or `steam_library_search`
-3. `steam_find_similar` and/or `steam_store_search` when enrichment is needed
+3. `steam_find_similar` and/or `steam_store_search` when enrichment is needed; keep `steam_find_similar` deterministic by default and use `mode="official"` only for `scope="store"` or `scope="both"` when authenticated official prioritization is explicitly useful
 4. `steam_export` and `steam_link_generate`
 
 This workflow depends on API-authoritative owned-library enumeration through `GetOwnedGames`. If `steam_status` reports missing `STEAM_API_KEY`, stop and ask for configuration instead of relying on stale local data.
@@ -56,7 +56,7 @@ Recommended flow:
 
 1. `steam_status`
 2. `steam_library_search` with backlog and Deck filters
-3. `steam_find_similar` for deterministic ranking
+3. `steam_find_similar` for backlog ranking; keep the default deterministic mode unless authenticated official store prioritization is explicitly needed for `scope="store"` or `scope="both"`
 4. `steam_export` and `steam_link_generate`
 
 This workflow also depends on API-authoritative owned-library enumeration. If `steam_status` reports missing `STEAM_API_KEY`, stop and ask for configuration before triaging the backlog.
@@ -75,7 +75,7 @@ Recommended flow:
 
 1. `steam_status`
 2. `steam_release_scout`
-3. `steam_store_search`, `steam_find_similar`, or `steam_link_generate` when deeper comparison or links are useful
+3. `steam_store_search`, `steam_find_similar`, or `steam_link_generate` when deeper comparison or links are useful; `steam_find_similar` can stay deterministic or use optional official prioritization for store-side comparison only with `mode="official"`, `scope="store"` or `scope="both"`, and a resolvable selected user
 4. `steam_export` for JSON or Markdown handoff
 
 ## Safety notes
