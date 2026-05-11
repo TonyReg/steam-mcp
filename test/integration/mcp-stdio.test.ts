@@ -118,6 +118,7 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       'steam_recently_played',
       'steam_release_scout',
       'steam_status',
+      'steam_store_query',
       'steam_store_search'
     ]);
     const collectionApplyTool = tools.tools.find((tool) => tool.name === 'steam_collection_apply');
@@ -161,6 +162,15 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.match(JSON.stringify(releaseScoutPrompt), /Requested release types: game, dlc/);
     assert.match(JSON.stringify(releaseScoutPrompt), /Coming soon only: false/);
     assert.match(JSON.stringify(releaseScoutPrompt), /STEAM_API_KEY/);
+
+    const libraryCuratorPrompt = await client.getPrompt({
+      name: 'steam_library_curator',
+      arguments: {
+        goal: 'Find co-op puzzle recommendations'
+      }
+    });
+    assert.match(JSON.stringify(libraryCuratorPrompt), /steam_store_query/);
+    assert.match(JSON.stringify(libraryCuratorPrompt), /steam_store_search/);
 
     const status = await client.callTool({ name: 'steam_status', arguments: {} });
     const statusPayload = parseFirstTextContent(status) as {
