@@ -22,6 +22,11 @@ const steamDeckBacklogPromptArgs = {
 };
 const steamDeckBacklogPromptSchema = z.object(steamDeckBacklogPromptArgs);
 
+const steamRecentlyPlayedPromptArgs = {
+  limit: z.string().optional().describe('Optional integer result limit as a string, for example "10".')
+};
+const steamRecentlyPlayedPromptSchema = z.object(steamRecentlyPlayedPromptArgs);
+
 const steamReleaseScoutPromptTypeSchema = z.enum(['game', 'software', 'dlc']);
 type SteamReleaseScoutPromptType = z.infer<typeof steamReleaseScoutPromptTypeSchema>;
 
@@ -39,6 +44,15 @@ const steamReleaseScoutPromptArgs = {
 const steamReleaseScoutPromptSchema = z.object(steamReleaseScoutPromptArgs);
 
 function parseSteamReleaseScoutPromptLimit(rawLimit: string | undefined): number | undefined {
+  const trimmed = rawLimit?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return z.coerce.number().int().min(1).max(100).parse(trimmed);
+}
+
+function parseSteamRecentlyPlayedPromptLimit(rawLimit: string | undefined): number | undefined {
   const trimmed = rawLimit?.trim();
   if (!trimmed) {
     return undefined;
@@ -199,6 +213,43 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               '4. Use steam_find_similar when you need to rank candidates by overlap with the user’s known favorites or recent play patterns; keep the default deterministic mode for backlog-first triage and use mode="official" only when store or both-scope ranking is explicitly needed and authenticated official prioritization is available.',
               '5. Use steam_export to produce a Markdown shortlist or JSON payload, and steam_link_generate to provide store/library/launch links for the finalists.',
               '6. Keep the reasoning explicit: Deck status, genres, tags, collections, favorites, hidden flags, playtime, and official store prioritization only when mode="official" was used.'
+            ].join('\n')
+          }
+        }]
+      };
+    }
+  );
+
+  registerPromptShallow(
+    server,
+    'steam_recently_played',
+    {
+      title: 'Steam recently played',
+      description: 'Guide an agent through read-only recently played retrieval for the selected Steam user via the official Steam Web API.',
+      argsSchema: steamRecentlyPlayedPromptArgs
+    },
+    (rawArgs: unknown) => {
+      const parsedArgs = steamRecentlyPlayedPromptSchema.parse(rawArgs);
+      const limit = parseSteamRecentlyPlayedPromptLimit(parsedArgs.limit);
+
+      return {
+        description: 'Read-only workflow for inspecting recently played games for the selected Steam user via the official Steam Web API.',
+        messages: [{
+          role: 'user',
+          content: {
+            type: 'text',
+            text: [
+              'Use the Steam MCP to inspect recently played Steam games safely.',
+              `Requested result limit: ${limit ?? 'all available recently played games'}.`,
+              'Workflow:',
+              '1. Call steam_status first and confirm the detected selected Steam user, whether Steam Web API access is available, and whether the selected user can be resolved to a SteamID64.',
+              '2. If steam_status reports that STEAM_API_KEY is unavailable, stop and tell the user that steam_recently_played requires authenticated Steam Web API access.',
+              '3. If there is no selected Steam user or the selected user cannot be resolved to a SteamID64, stop and tell the user that steam_recently_played cannot run until the user-selection issue is fixed.',
+              '4. Use steam_recently_played for the primary read-only pass over the selected user\'s recent play history.',
+              '5. Use limit only when the user wants a shorter slice of the recent-play list; otherwise inspect the full returned set.',
+              '6. If the user wants more context on recent titles, use steam_find_similar for overlap or follow-up recommendations, steam_store_search for storefront context, and steam_link_generate for direct store or launch links.',
+              '7. Use steam_export when the user wants a JSON or Markdown handoff of the recent-play list.',
+              '8. Explain results in explicit terms such as playtime over the last two weeks, lifetime playtime, app identity, and the selected-user context.'
             ].join('\n')
           }
         }]

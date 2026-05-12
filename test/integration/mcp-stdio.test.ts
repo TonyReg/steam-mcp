@@ -7,12 +7,19 @@ import { Client } from '@modelcontextprotocol/sdk/client';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { materializeSteamFixture } from '../support/fixture-steam.js';
 
-function parseFirstTextContent(result: { content?: Array<{ type: string; text?: string }> }): unknown {
-  const firstContent = result.content?.[0];
-  assert.ok(firstContent);
-  assert.equal(firstContent.type, 'text');
-  assert.equal(typeof firstContent.text, 'string');
-  return JSON.parse(firstContent.text);
+function parseFirstTextContent(result: unknown): unknown {
+  assert.ok(result && typeof result === 'object');
+
+  const content = Reflect.get(result, 'content');
+  assert.ok(Array.isArray(content));
+
+  const firstContent = content[0];
+  assert.ok(firstContent && typeof firstContent === 'object');
+  assert.equal(Reflect.get(firstContent, 'type'), 'text');
+
+  const text = Reflect.get(firstContent, 'text');
+  assert.ok(typeof text === 'string');
+  return JSON.parse(text);
 }
 
 function createPreloadPath(fixtureRoot: string): string {
@@ -134,6 +141,7 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       'steam_collection_planner',
       'steam_deck_backlog_triage',
       'steam_library_curator',
+      'steam_recently_played',
       'steam_release_scout'
     ]);
 
@@ -148,6 +156,19 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.match(JSON.stringify(collectionPlannerPrompt), /Group co-op hidden backlog/);
     assert.match(JSON.stringify(collectionPlannerPrompt), /STEAM_ENABLE_WINDOWS_ORCHESTRATION=1/);
     assert.match(JSON.stringify(collectionPlannerPrompt), /does not mean Steam cloud sync has completed/);
+
+    const recentlyPlayedPrompt = await client.getPrompt({
+      name: 'steam_recently_played',
+      arguments: {
+        limit: '7'
+      }
+    });
+    assert.match(JSON.stringify(recentlyPlayedPrompt), /steam_recently_played/);
+    assert.match(JSON.stringify(recentlyPlayedPrompt), /Requested result limit: 7/);
+    assert.match(JSON.stringify(recentlyPlayedPrompt), /selected Steam user/);
+    assert.match(JSON.stringify(recentlyPlayedPrompt), /SteamID64/);
+    assert.match(JSON.stringify(recentlyPlayedPrompt), /steam_find_similar/);
+    assert.match(JSON.stringify(recentlyPlayedPrompt), /STEAM_API_KEY/);
 
     const releaseScoutPrompt = await client.getPrompt({
       name: 'steam_release_scout',

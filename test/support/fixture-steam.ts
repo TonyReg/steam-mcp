@@ -10,7 +10,7 @@ export interface MaterializedSteamFixture {
   stateDir: string;
   steamId: string;
   cloudStorageDir: string;
-  env: NodeJS.ProcessEnv;
+  env: Record<string, string>;
 }
 
 export async function materializeSteamFixture(repoRoot: string, enableWrites = false): Promise<MaterializedSteamFixture> {
@@ -30,8 +30,12 @@ export async function materializeSteamFixture(repoRoot: string, enableWrites = f
   const libraryFolders = await readFile(libraryFoldersPath, 'utf8');
   await writeFile(
     libraryFoldersPath,
-    libraryFolders.replaceAll('__INSTALL_DIR__', installDir).replaceAll('__SECOND_LIBRARY__', secondaryLibraryDir),
+    libraryFolders.replace(/__INSTALL_DIR__/g, installDir).replace(/__SECOND_LIBRARY__/g, secondaryLibraryDir),
     'utf8'
+  );
+
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
   );
 
   return {
@@ -42,7 +46,7 @@ export async function materializeSteamFixture(repoRoot: string, enableWrites = f
     steamId: '76561198000000000',
     cloudStorageDir,
     env: {
-      ...process.env,
+      ...env,
       LOCALAPPDATA: rootDir,
       STEAM_INSTALL_DIR: installDir,
       STEAM_ID: '76561198000000000',
