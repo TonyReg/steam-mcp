@@ -118,6 +118,7 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       'steam_collection_apply',
       'steam_collection_plan',
       'steam_export',
+      'steam_featured_scout',
       'steam_find_similar',
       'steam_library_list',
       'steam_library_search',
@@ -140,6 +141,7 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.deepEqual(promptNames, [
       'steam_collection_planner',
       'steam_deck_backlog_triage',
+      'steam_featured_scout',
       'steam_library_curator',
       'steam_recently_played',
       'steam_release_scout',
@@ -197,6 +199,24 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.match(JSON.stringify(releaseScoutPrompt), /Requested tag filters: story rich, cozy/);
     assert.match(JSON.stringify(releaseScoutPrompt), /OR within one facet family and AND across different facet families/);
     assert.match(JSON.stringify(releaseScoutPrompt), /STEAM_API_KEY/);
+
+    const featuredScoutPrompt = await client.getPrompt({
+      name: 'steam_featured_scout',
+      arguments: {
+        limit: '8',
+        types: 'game,software',
+        language: 'japanese',
+        countryCode: 'JP'
+      }
+    });
+    assert.match(JSON.stringify(featuredScoutPrompt), /steam_featured_scout/);
+    assert.match(JSON.stringify(featuredScoutPrompt), /Requested result limit: 8/);
+    assert.match(JSON.stringify(featuredScoutPrompt), /Requested featured item types: game, software/);
+    assert.match(JSON.stringify(featuredScoutPrompt), /Requested language: japanese/);
+    assert.match(JSON.stringify(featuredScoutPrompt), /Requested country code: JP/);
+    assert.match(JSON.stringify(featuredScoutPrompt), /GetItemsToFeature/);
+    assert.match(JSON.stringify(featuredScoutPrompt), /read-only and marketing-backed/);
+    assert.match(JSON.stringify(featuredScoutPrompt), /STEAM_API_KEY/);
 
     const storeQueryPrompt = await client.getPrompt({
       name: 'steam_store_query',

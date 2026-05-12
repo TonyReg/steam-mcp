@@ -9,6 +9,7 @@ import { registerSteamFindSimilarTool } from './tools/steam-find-similar.js';
 import { registerSteamLibraryListTool } from './tools/steam-library-list.js';
 import { registerSteamLibrarySearchTool } from './tools/steam-library-search.js';
 import { registerSteamLinkGenerateTool } from './tools/steam-link-generate.js';
+import { registerSteamFeaturedScoutTool } from './tools/steam-featured-scout.js';
 import { registerSteamStatusTool } from './tools/steam-status.js';
 import { registerSteamReleaseScoutTool } from './tools/steam-release-scout.js';
 import { registerSteamRecentlyPlayedTool } from './tools/steam-recently-played.js';
@@ -26,6 +27,7 @@ export function createServer(env: NodeJS.ProcessEnv = process.env, context: Stea
   registerSteamLibrarySearchTool(server, context);
   registerSteamStoreQueryTool(server, context);
   registerSteamStoreSearchTool(server, context);
+  registerSteamFeaturedScoutTool(server, context);
   registerSteamReleaseScoutTool(server, context);
   registerSteamRecentlyPlayedTool(server, context);
   registerSteamFindSimilarTool(server, context);
