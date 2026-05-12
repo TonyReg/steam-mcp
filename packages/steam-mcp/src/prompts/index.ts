@@ -31,7 +31,10 @@ const steamReleaseScoutPromptArgs = {
   language: z.string().optional().describe('Optional Steam language string, for example "schinese" or "japanese".'),
   countryCode: z.string().optional().describe('Optional Steam country code string, for example "US" or "JP".'),
   comingSoonOnly: z.string().optional().describe('Optional boolean string: "true" or "false".'),
-  freeToPlay: z.string().optional().describe('Optional boolean string: "true" or "false" to require free-to-play or paid results.')
+  freeToPlay: z.string().optional().describe('Optional boolean string: "true" or "false" to require free-to-play or paid results.'),
+  genres: z.string().optional().describe('Optional comma-separated genre filters string, for example "puzzle,adventure".'),
+  categories: z.string().optional().describe('Optional comma-separated category filters string, for example "single-player,co-op".'),
+  tags: z.string().optional().describe('Optional comma-separated tag filters string, for example "story rich,co-op".')
 };
 const steamReleaseScoutPromptSchema = z.object(steamReleaseScoutPromptArgs);
 
@@ -80,6 +83,20 @@ function parseSteamReleaseScoutPromptFreeToPlay(rawFreeToPlay: string | undefine
   }
 
   return z.enum(['true', 'false']).transform((value) => value === 'true').parse(trimmed);
+}
+
+function parseSteamReleaseScoutPromptFacetValues(rawValue: string | undefined): string[] | undefined {
+  const trimmed = rawValue?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const values = trimmed
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter((value): value is string => value.length > 0);
+
+  return values.length > 0 ? values : undefined;
 }
 
 export function registerSteamPrompts(server: McpServer, context: SteamMcpContext): void {
@@ -205,6 +222,9 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
       const countryCode = parseSteamReleaseScoutPromptText(parsedArgs.countryCode);
       const comingSoonOnly = parseSteamReleaseScoutPromptComingSoonOnly(parsedArgs.comingSoonOnly);
       const freeToPlay = parseSteamReleaseScoutPromptFreeToPlay(parsedArgs.freeToPlay);
+      const genres = parseSteamReleaseScoutPromptFacetValues(parsedArgs.genres);
+      const categories = parseSteamReleaseScoutPromptFacetValues(parsedArgs.categories);
+      const tags = parseSteamReleaseScoutPromptFacetValues(parsedArgs.tags);
       const selectedTypes = types?.length ? types.join(', ') : 'game, software, dlc';
       return {
         description: 'Read-only workflow for scouting official Steam releases using authenticated official feeds plus official store metadata.',
@@ -220,15 +240,19 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               countryCode ? `Requested country code: ${countryCode}.` : 'Requested country code: default official client locale.',
               `Coming soon only: ${comingSoonOnly ?? true}.`,
               freeToPlay === undefined ? 'Free to play filter: none.' : `Free to play filter: ${freeToPlay}.`,
+              genres === undefined ? 'Requested genre filters: none.' : `Requested genre filters: ${genres.join(', ')}.`,
+              categories === undefined ? 'Requested category filters: none.' : `Requested category filters: ${categories.join(', ')}.`,
+              tags === undefined ? 'Requested tag filters: none.' : `Requested tag filters: ${tags.join(', ')}.`,
               'Workflow:',
               '1. Call steam_status first and confirm the detected Steam user and whether the Steam Web API key is available in MCP runtime.',
               '2. Use steam_release_scout for the primary scouting pass. Keep the workflow read-only and do not fall back to any write path.',
               '3. When useful, pass language and countryCode to scope the official scout to a specific locale context without changing the result shape.',
               '4. When useful, pass freeToPlay=true or freeToPlay=false to narrow the official scout with the same boolean semantics used elsewhere in the MCP.',
-              '5. If the user wants deeper context on matches, use steam_store_search for comparison, steam_find_similar for owned-library overlap or optional official store prioritization (only with mode="official", scope="store" or "both", and a resolvable selected user), and steam_link_generate for store links.',
-              '6. Use steam_export when the user wants a JSON or Markdown handoff of the shortlisted releases.',
-              '7. Explain results in explicit terms such as release status, app type, locale context, free-to-play state, store metadata, and how the shortlist was filtered by limit, types, language, countryCode, comingSoonOnly, freeToPlay, or optional official prioritization.',
-              '8. If steam_status or steam_release_scout reports that the Steam Web API key is unavailable, tell the user that steam_release_scout requires `STEAM_API_KEY` and stop instead of improvising with unofficial substitutes.'
+              '5. When useful, pass genres, categories, and tags to use the tool\'s existing human-readable facet filters; treat them as OR within one facet family and AND across different facet families.',
+              '6. If the user wants deeper context on matches, use steam_store_search for comparison, steam_find_similar for owned-library overlap or optional official store prioritization (only with mode="official", scope="store" or "both", and a resolvable selected user), and steam_link_generate for store links.',
+              '7. Use steam_export when the user wants a JSON or Markdown handoff of the shortlisted releases.',
+              '8. Explain results in explicit terms such as release status, app type, locale context, free-to-play state, store metadata, and how the shortlist was filtered by limit, types, language, countryCode, comingSoonOnly, freeToPlay, genres, categories, tags, or optional official prioritization.',
+              '9. If steam_status or steam_release_scout reports that the Steam Web API key is unavailable, tell the user that steam_release_scout requires `STEAM_API_KEY` and stop instead of improvising with unofficial substitutes.'
             ].join('\n')
           }
         }]

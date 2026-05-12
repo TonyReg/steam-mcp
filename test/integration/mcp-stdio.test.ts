@@ -157,7 +157,10 @@ test('stdio server registers exact tools and answers basic calls', async () => {
         language: 'japanese',
         countryCode: 'JP',
         comingSoonOnly: 'false',
-        freeToPlay: 'true'
+        freeToPlay: 'true',
+        genres: 'Puzzle, Adventure',
+        categories: 'Single-player, Co-op',
+        tags: 'Story Rich, Cozy'
       }
     });
     assert.match(JSON.stringify(releaseScoutPrompt), /steam_release_scout/);
@@ -167,6 +170,10 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.match(JSON.stringify(releaseScoutPrompt), /Requested country code: JP/);
     assert.match(JSON.stringify(releaseScoutPrompt), /Coming soon only: false/);
     assert.match(JSON.stringify(releaseScoutPrompt), /Free to play filter: true/);
+    assert.match(JSON.stringify(releaseScoutPrompt), /Requested genre filters: puzzle, adventure/);
+    assert.match(JSON.stringify(releaseScoutPrompt), /Requested category filters: single-player, co-op/);
+    assert.match(JSON.stringify(releaseScoutPrompt), /Requested tag filters: story rich, cozy/);
+    assert.match(JSON.stringify(releaseScoutPrompt), /OR within one facet family and AND across different facet families/);
     assert.match(JSON.stringify(releaseScoutPrompt), /STEAM_API_KEY/);
 
     const libraryCuratorPrompt = await client.getPrompt({
