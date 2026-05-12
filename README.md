@@ -9,6 +9,7 @@
 - Search the local library with `steam_library_search`
 - Search the public Steam store with `steam_store_search`
 - Query the authenticated official Steam catalog with `steam_store_query`
+- Browse authenticated official Steam curator/list summaries with `steam_curator_discovery`
 - Scout authenticated featured/editorial Steam marketing placements with `steam_featured_scout`
 - Scout upcoming or newly released Steam catalog apps with `steam_release_scout`
 - List recently played games with `steam_recently_played`
@@ -74,6 +75,7 @@ If your MCP client supports prompts, `steam-mcp` includes built-in workflows for
 - `steam_deck_backlog_triage` — shortlist Steam Deck-friendly backlog candidates
 - `steam_recently_played` — read-only workflow for inspecting recent play history for the selected Steam user
 - `steam_store_query` — read-only authenticated official catalog discovery that preserves official defaults when optional filters are omitted, supports bounded include/exclude facet filtering, and offers opt-in facet enrichment
+- `steam_curator_discovery` — read-only authenticated workflow for browsing official curator/list summaries with bounded `limit` / `start` paging and no per-list app details yet
 - `steam_featured_scout` — read-only marketing-backed workflow for scouting featured/editorial Steam store placements while preserving marketing ordering after enrichment, deduplication, and bounded filtering
 - `steam_release_scout` — read-only workflow for upcoming or newly released Steam catalog scouting
 
@@ -111,6 +113,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 | `steam_library_search` | Search the local library with deterministic match reasons |
 | `steam_store_search` | Search the public Steam store without authenticated session reuse |
 | `steam_store_query` | Query the authenticated official Steam catalog while preserving official defaults for omitted filters, with bounded type, locale, release-state, free-to-play, and human-readable include/exclude facet filters plus opt-in facet enrichment; requires a Steam Web API key |
+| `steam_curator_discovery` | Browse authenticated official Steam curator/list summaries only via `GetLists`, with bounded `limit` / `start` paging and no per-list app details yet; read-only and requires a Steam Web API key |
 | `steam_featured_scout` | Scout authenticated official Steam marketing placements for featured/editorial apps via `GetItemsToFeature`, with bounded limit, type, and locale guidance plus preserved marketing ordering after official enrichment, deduplication, and bounded filtering; requires a Steam Web API key |
 | `steam_release_scout` | Read-only upcoming/recent release scouting via official catalog access plus public appdetails enrichment, with optional locale passthrough and bounded human-readable facet filters; requires a Steam Web API key |
 | `steam_recently_played` | Read-only recently played game listing via the official Steam Web API; requires a Steam Web API key |
@@ -126,6 +129,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 - The project is Windows-first and assumes a local Steam installation
 - Steam store and Steam Deck data are used as read-only enrichment sources
 - `steam_store_query` is read-only, requires `STEAM_API_KEY`, preserves official client defaults when optional filters are omitted, supports bounded human-readable include/exclude genre/category/tag filtering via authoritative cacheable store details, treats `includeFacets` as opt-in enrichment only, may still return fewer than the requested limit after bounded post-filtering, uses `facetsAvailable=false` when no facet payload could be attached for an otherwise valid item, and complements the unauthenticated public-store `steam_store_search` path
+- `steam_curator_discovery` is read-only, requires `STEAM_API_KEY`, uses authenticated official `GetLists` metadata-only mode with bounded `limit` / `start` paging, returns curator/list summaries only, does not expose per-list app details yet, and should not be used as a substitute for `steam_featured_scout` or `steam_release_scout`
 - `steam_featured_scout` is read-only, requires `STEAM_API_KEY`, uses authenticated official marketing placements from `GetItemsToFeature` plus official store metadata enrichment, preserves marketing ordering after enrichment, deduplication, and bounded filtering, and is for featured/editorial discovery rather than release scouting
 - `steam_release_scout` is read-only and fails explicitly when no Steam Web API key is available
 - `steam_recently_played` is read-only and fails explicitly when no Steam Web API key is available or no selected Steam user can be resolved
