@@ -12,6 +12,8 @@ skills/
     SKILL.md
   steam-deck-backlog-triage/
     SKILL.md
+  steam-recently-played/
+    SKILL.md
   steam-release-scout/
     SKILL.md
 ```
@@ -30,6 +32,10 @@ skills/
 - **`steam-deck-backlog-triage`**
   - Steam Deck backlog filtering and deterministic shortlist generation from the owned library
 
+- **`steam-recently-played`**
+  - read-only inspection of recently played games for the selected Steam user through the official Steam Web API path
+  - deterministic follow-up comparison, export, and link workflows after the recent-play pass
+
 - **`steam-release-scout`**
   - read-only scouting for upcoming or newly released Steam catalog apps through authenticated official catalog access
   - deterministic export/link/comparison follow-up after the release shortlist
@@ -39,6 +45,7 @@ These skills are designed to sit on top of the MCP prompts already implemented i
 - `steam_library_curator`
 - `steam_collection_planner`
 - `steam_deck_backlog_triage`
+- `steam_recently_played`
 - `steam_release_scout`
 
 ## Why they are stored here
