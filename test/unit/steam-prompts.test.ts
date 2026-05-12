@@ -125,7 +125,36 @@ test('steam store query prompt uses default guidance when optional filters are o
   assert.match(text, /Excluded tag filters: none/);
 });
 
-test('steam featured scout prompt renders featured/editorial routing and authenticated prerequisite guidance', async () => {
+test('steam curator discovery prompt renders bounded metadata-only routing and authenticated prerequisite guidance', async () => {
+  const harness = createPromptHarness();
+
+  const result = await harness.invoke('steam_curator_discovery', {
+    limit: '8',
+    start: '40'
+  });
+  const text = renderFirstPromptText(result);
+
+  assert.match(text, /Requested result limit: 8/);
+  assert.match(text, /Requested start offset: 40/);
+  assert.match(text, /steam_curator_discovery/);
+  assert.match(text, /curator\/list summaries only/);
+  assert.match(text, /does not expose per-list app details yet/);
+  assert.match(text, /steam_featured_scout/);
+  assert.match(text, /steam_release_scout/);
+  assert.match(text, /STEAM_API_KEY/);
+});
+
+test('steam curator discovery prompt uses default bounded guidance when optional args are omitted', async () => {
+  const harness = createPromptHarness();
+
+  const result = await harness.invoke('steam_curator_discovery', {});
+  const text = renderFirstPromptText(result);
+
+  assert.match(text, /Requested result limit: 20/);
+  assert.match(text, /Requested start offset: 0/);
+});
+
+test('steam featured scout prompt renders featured\/editorial routing and authenticated prerequisite guidance', async () => {
   const harness = createPromptHarness();
 
   const result = await harness.invoke('steam_featured_scout', {

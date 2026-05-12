@@ -60,6 +60,12 @@ const steamReleaseScoutPromptArgs = {
 };
 const steamReleaseScoutPromptSchema = z.object(steamReleaseScoutPromptArgs);
 
+const steamCuratorDiscoveryPromptArgs = {
+  limit: z.string().optional().describe('Optional integer result limit as a string, for example "20".'),
+  start: z.string().optional().describe('Optional integer offset as a string, for example "40".')
+};
+const steamCuratorDiscoveryPromptSchema = z.object(steamCuratorDiscoveryPromptArgs);
+
 const steamFeaturedScoutPromptArgs = {
   limit: z.string().optional().describe('Optional integer result limit as a string, for example "20".'),
   types: z.string().optional().describe('Optional comma-separated featured item types string, for example "game,software".'),
@@ -93,6 +99,15 @@ function parseSteamStoreQueryPromptLimit(rawLimit: string | undefined): number |
   }
 
   return z.coerce.number().int().min(1).max(100).parse(trimmed);
+}
+
+function parseSteamCuratorDiscoveryPromptStart(rawStart: string | undefined): number | undefined {
+  const trimmed = rawStart?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return z.coerce.number().int().min(0).max(10000).parse(trimmed);
 }
 
 function parseSteamReleaseScoutPromptTypes(rawTypes: string | undefined): SteamReleaseScoutPromptType[] | undefined {
@@ -384,6 +399,45 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               '8. If the user wants simpler unauthenticated lookup, switch to steam_store_search. If they want release-specific scouting, switch to steam_release_scout. If they want comparison or follow-up recommendations on returned titles, use steam_find_similar or steam_link_generate as needed.',
               '9. Use steam_export when the user wants a JSON or Markdown handoff of the filtered catalog results.',
               '10. Keep the reasoning explicit: release state, type filters, locale context, pricing model, include/exclude facet filters, additive metadata, and optional facet enrichment.'
+            ].join('\n')
+          }
+        }]
+      };
+    }
+  );
+
+  registerPromptShallow(
+    server,
+    'steam_curator_discovery',
+    {
+      title: 'Steam curator discovery',
+      description: 'Guide an agent through read-only authenticated official curator/list metadata discovery.',
+      argsSchema: steamCuratorDiscoveryPromptArgs
+    },
+    (rawArgs: unknown) => {
+      const parsedArgs = steamCuratorDiscoveryPromptSchema.parse(rawArgs);
+      const limit = parseSteamReleaseScoutPromptLimit(parsedArgs.limit);
+      const start = parseSteamCuratorDiscoveryPromptStart(parsedArgs.start);
+
+      return {
+        description: 'Read-only workflow for browsing authenticated official Steam curator/list summaries only.',
+        messages: [{
+          role: 'user',
+          content: {
+            type: 'text',
+            text: [
+              'Use the Steam MCP to browse Steam curator/list metadata safely.',
+              `Requested result limit: ${limit ?? 20}.`,
+              `Requested start offset: ${start ?? 0}.`,
+              'Workflow:',
+              '1. Call steam_status first and confirm whether the Steam Web API key is available in MCP runtime.',
+              '2. If steam_status reports that STEAM_API_KEY is unavailable, stop and tell the user that steam_curator_discovery requires authenticated official access.',
+              '3. Use steam_curator_discovery for the primary read-only pass over curator/list metadata. This slice returns curator/list summaries only and does not expose per-list app details yet.',
+              '4. Use limit and start only to page the official curator/list summary feed while preserving upstream ordering.',
+              '5. If the user asks for featured/editorial placements, switch to steam_featured_scout instead of using curator discovery as a substitute.',
+              '6. If the user asks for release-specific scouting, switch to steam_release_scout instead of using curator discovery as a substitute.',
+              '7. Use steam_export when the user wants a JSON or Markdown handoff of the curator/list summary results, and use steam_link_generate only when you already have enough identifiers for follow-up links.',
+              '8. Explain results in explicit terms such as curator identity, list title, description, app count, paging inputs, and the fact that the backing method is GetLists metadata-only mode.'
             ].join('\n')
           }
         }]

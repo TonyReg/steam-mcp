@@ -32,7 +32,8 @@ async function writeOwnedGamesFetchPreload(
   appDetailsPayloadById: Record<number, string> = {},
   recentlyPlayedGames: Array<Record<string, unknown>> = [],
   storeSearchItems: Array<Record<string, unknown>> = [],
-  prioritizedAppIds: number[] = []
+  prioritizedAppIds: number[] = [],
+  curatorLists: Array<Record<string, unknown>> = []
 ): Promise<string> {
   const preloadPath = createPreloadPath(fixtureRoot);
   const script = `const ownedGames = ${JSON.stringify(appIds)};
@@ -40,6 +41,7 @@ const appDetailsPayloadById = ${JSON.stringify(appDetailsPayloadById)};
 const recentlyPlayedGames = ${JSON.stringify(recentlyPlayedGames)};
 const storeSearchItems = ${JSON.stringify(storeSearchItems)};
 const prioritizedAppIds = ${JSON.stringify(prioritizedAppIds)};
+const curatorLists = ${JSON.stringify(curatorLists)};
 const originalFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = async (input, init) => {
   const url = new URL(String(input));
@@ -66,6 +68,14 @@ globalThis.fetch = async (input, init) => {
     return new Response(JSON.stringify({
       response: {
         ids: prioritizedAppIds.map((appId) => ({ appid: appId }))
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+
+  if (url.hostname === 'api.steampowered.com' && url.pathname === '/IStoreCurationService/GetLists/v1/') {
+    return new Response(JSON.stringify({
+      response: {
+        lists: curatorLists
       }
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
@@ -117,6 +127,7 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.deepEqual(toolNames, [
       'steam_collection_apply',
       'steam_collection_plan',
+      'steam_curator_discovery',
       'steam_export',
       'steam_featured_scout',
       'steam_find_similar',
@@ -140,6 +151,7 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     const promptNames = prompts.prompts.map((prompt) => prompt.name).sort((left, right) => left.localeCompare(right));
     assert.deepEqual(promptNames, [
       'steam_collection_planner',
+      'steam_curator_discovery',
       'steam_deck_backlog_triage',
       'steam_featured_scout',
       'steam_library_curator',
@@ -199,6 +211,22 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.match(JSON.stringify(releaseScoutPrompt), /Requested tag filters: story rich, cozy/);
     assert.match(JSON.stringify(releaseScoutPrompt), /OR within one facet family and AND across different facet families/);
     assert.match(JSON.stringify(releaseScoutPrompt), /STEAM_API_KEY/);
+
+    const curatorDiscoveryPrompt = await client.getPrompt({
+      name: 'steam_curator_discovery',
+      arguments: {
+        limit: '8',
+        start: '40'
+      }
+    });
+    assert.match(JSON.stringify(curatorDiscoveryPrompt), /steam_curator_discovery/);
+    assert.match(JSON.stringify(curatorDiscoveryPrompt), /Requested result limit: 8/);
+    assert.match(JSON.stringify(curatorDiscoveryPrompt), /Requested start offset: 40/);
+    assert.match(JSON.stringify(curatorDiscoveryPrompt), /curator\/list summaries only/);
+    assert.match(JSON.stringify(curatorDiscoveryPrompt), /per-list app details yet/);
+    assert.match(JSON.stringify(curatorDiscoveryPrompt), /steam_featured_scout/);
+    assert.match(JSON.stringify(curatorDiscoveryPrompt), /steam_release_scout/);
+    assert.match(JSON.stringify(curatorDiscoveryPrompt), /STEAM_API_KEY/);
 
     const featuredScoutPrompt = await client.getPrompt({
       name: 'steam_featured_scout',
@@ -524,6 +552,103 @@ test('stdio server returns recently played games through preload-patched GetRece
         playtimeTwoWeeks: 45,
         playtimeForever: 240,
         iconUrl: 'icon-620'
+      }
+    ]);
+  } finally {
+    await client.close();
+  }
+});
+
+test('stdio server returns curator discovery summaries through preload-patched GetLists', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  fixture.env.STEAM_API_KEY = 'test-key';
+  const preloadPath = await writeOwnedGamesFetchPreload(
+    fixture.rootDir,
+    [],
+    {},
+    [],
+    [],
+    [],
+    [
+      {
+        listid: '9876543210123456789',
+        title: 'Co-op Gems',
+        blurb: 'Handpicked co-op games.',
+        item_count: 12,
+        creator: {
+          name: 'Co-op Curator',
+          steamid: '76561198000000001'
+        }
+      },
+      {
+        list_id: '12345678901234567890',
+        name: 'Narrative Finds',
+        description: 'Story-forward recommendations.',
+        app_count: 7,
+        curator_name: 'Narrative Curator',
+        curator_steamid: '76561198000000002'
+      }
+    ]
+  );
+  fixture.env.NODE_OPTIONS = [fixture.env.NODE_OPTIONS, `--import=${pathToFileURL(preloadPath).href}`].filter(Boolean).join(' ');
+
+  const client = new Client({ name: 'steam-mcp-test-client-curator-discovery', version: '0.1.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(repoRoot, 'packages', 'steam-mcp', 'dist', 'index.js')],
+    cwd: repoRoot,
+    env: fixture.env,
+    stderr: 'pipe'
+  });
+
+  await client.connect(transport);
+
+  try {
+    const result = await client.callTool({
+      name: 'steam_curator_discovery',
+      arguments: {
+        limit: 2,
+        start: 40
+      }
+    });
+    const payload = parseFirstTextContent(result) as Array<{
+      listId: string;
+      title: string;
+      source: string;
+      ordering: string;
+      method: string;
+      filtersApplied: string[];
+      curatorName?: string;
+      curatorSteamId?: string;
+      description?: string;
+      appCount?: number;
+    }>;
+
+    assert.deepEqual(payload, [
+      {
+        listId: '9876543210123456789',
+        title: 'Co-op Gems',
+        source: 'curation',
+        ordering: 'curation',
+        method: 'getLists',
+        filtersApplied: ['limit:2', 'start:40', 'metadataOnly:true'],
+        curatorName: 'Co-op Curator',
+        curatorSteamId: '76561198000000001',
+        description: 'Handpicked co-op games.',
+        appCount: 12
+      },
+      {
+        listId: '12345678901234567890',
+        title: 'Narrative Finds',
+        source: 'curation',
+        ordering: 'curation',
+        method: 'getLists',
+        filtersApplied: ['limit:2', 'start:40', 'metadataOnly:true'],
+        curatorName: 'Narrative Curator',
+        curatorSteamId: '76561198000000002',
+        description: 'Story-forward recommendations.',
+        appCount: 7
       }
     ]);
   } finally {
