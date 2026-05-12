@@ -61,6 +61,23 @@ Recommended flow:
 
 This workflow also depends on API-authoritative owned-library enumeration. If `steam_status` reports missing `STEAM_API_KEY`, stop and ask for configuration before triaging the backlog.
 
+### `steam_recently_played`
+
+Use this when an agent should inspect recently played games for the selected Steam user through the official Steam Web API path.
+
+Arguments:
+
+- `limit` (optional string integer, for example `"10"`)
+
+Recommended flow:
+
+1. `steam_status`
+2. `steam_recently_played`
+3. `steam_find_similar`, `steam_store_search`, or `steam_link_generate` when deeper comparison or links are useful
+4. `steam_export`
+
+This workflow depends on a discoverable selected Steam user, a resolvable SteamID64, and `STEAM_API_KEY`. If `steam_status` reports any of those prerequisites missing, stop and ask for configuration or user-selection correction instead of improvising.
+
 ### `steam_release_scout`
 
 Use this when an agent should scout upcoming or newly released Steam catalog apps through the authenticated official catalog path.

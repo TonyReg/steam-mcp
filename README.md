@@ -71,6 +71,7 @@ If your MCP client supports prompts, `steam-mcp` includes built-in workflows for
 - `steam_library_curator` — safe library analysis, search, recommendations, exports, and links
 - `steam_collection_planner` — plan-first collection or hidden-state changes with protected-collection awareness
 - `steam_deck_backlog_triage` — shortlist Steam Deck-friendly backlog candidates
+- `steam_recently_played` — read-only workflow for inspecting recent play history for the selected Steam user
 - `steam_release_scout` — read-only workflow for upcoming or newly released Steam catalog scouting
 
 ## Environment variables
