@@ -6,7 +6,7 @@ test('official store client calls GetTopReleasesPages with runtime API key and n
   const requestedUrls: string[] = [];
   const client = new OfficialStoreClient({
     steamWebApiKey: 'test-key',
-    fetchImpl: async (input) => {
+    fetchImpl: async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       requestedUrls.push(url.toString());
       return new Response(JSON.stringify({
@@ -77,7 +77,7 @@ test('official store client calls GetItemsToFeature with input_json locale paylo
   const requestedUrls: string[] = [];
   const client = new OfficialStoreClient({
     steamWebApiKey: 'test-key',
-    fetchImpl: async (input) => {
+    fetchImpl: async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       requestedUrls.push(url.toString());
       return new Response(JSON.stringify({
@@ -136,7 +136,7 @@ test('official store client calls GetItems with input_json request payload and n
   const requestedUrls: string[] = [];
   const client = new OfficialStoreClient({
     steamWebApiKey: 'test-key',
-    fetchImpl: async (input) => {
+    fetchImpl: async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       requestedUrls.push(url.toString());
       return new Response(JSON.stringify({
@@ -353,11 +353,103 @@ test('official store client surfaces non-ok HTTP failures for GetItems requests'
   await assert.rejects(() => client.getItems({ appIds: [620] }), /Official store items request failed with status 502\./);
 });
 
+test('official store client calls GetLists with input_json request payload and normalizes metadata-only curator lists', async () => {
+  const requestedUrls: string[] = [];
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      requestedUrls.push(url.toString());
+      return new Response(JSON.stringify({
+        response: {
+          lists: [
+            {
+              listid: '9876543210123456789',
+              title: 'Co-op Gems',
+              blurb: 'Tightly curated co-op picks.',
+              item_count: 12,
+              creator: {
+                name: 'Puzzle Curator',
+                steamid: '76561198000000001'
+              }
+            },
+            {
+              list_id: '12345678901234567890',
+              name: 'Narrative Finds',
+              description: 'Story-rich recommendations.',
+              app_count: 7,
+              curator_name: 'Story Scout',
+              curator_steamid: '76561198000000002'
+            },
+            {
+              listid: 0,
+              title: ''
+            }
+          ]
+        }
+      }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }
+  });
+
+  const result = await client.getLists({ count: 20, start: 40, returnMetadataOnly: true });
+
+  assert.deepEqual(result, {
+    lists: [
+      {
+        listId: '9876543210123456789',
+        title: 'Co-op Gems',
+        curatorName: 'Puzzle Curator',
+        curatorSteamId: '76561198000000001',
+        description: 'Tightly curated co-op picks.',
+        appCount: 12
+      },
+      {
+        listId: '12345678901234567890',
+        title: 'Narrative Finds',
+        curatorName: 'Story Scout',
+        curatorSteamId: '76561198000000002',
+        description: 'Story-rich recommendations.',
+        appCount: 7
+      }
+    ]
+  });
+
+  const requestUrl = new URL(requestedUrls[0] ?? '');
+  assert.equal(requestUrl.toString().startsWith('https://api.steampowered.com/IStoreCurationService/GetLists/v1/'), true);
+  assert.equal(requestUrl.searchParams.get('key'), 'test-key');
+  assert.equal(requestUrl.searchParams.get('format'), 'json');
+  const inputJson = JSON.parse(requestUrl.searchParams.get('input_json') ?? '{}') as Record<string, unknown>;
+  assert.deepEqual(inputJson, {
+    count: 20,
+    start: 40,
+    return_metadata_only: true
+  });
+});
+
+test('official store client rejects GetLists calls when no API key is configured', async () => {
+  const client = new OfficialStoreClient({
+    fetchImpl: async () => {
+      throw new Error('fetch should not run');
+    }
+  });
+
+  await assert.rejects(() => client.getLists({ count: 20, returnMetadataOnly: true }), /STEAM_API_KEY/);
+});
+
+test('official store client surfaces non-ok HTTP failures for GetLists requests', async () => {
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async () => new Response('upstream failure', { status: 502 })
+  });
+
+  await assert.rejects(() => client.getLists({ count: 20, returnMetadataOnly: true }), /Official store curation request failed with status 502\./);
+});
+
 test('official store client calls Query with input_json request payload and normalizes upcoming items', async () => {
   const requestedUrls: string[] = [];
   const client = new OfficialStoreClient({
     steamWebApiKey: 'test-key',
-    fetchImpl: async (input) => {
+    fetchImpl: async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       requestedUrls.push(url.toString());
       return new Response(JSON.stringify({
@@ -484,7 +576,7 @@ test('official store client calls GetAppList with runtime API key and normalizes
   const requestedUrls: string[] = [];
   const client = new OfficialStoreClient({
     steamWebApiKey: 'test-key',
-    fetchImpl: async (input) => {
+    fetchImpl: async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       requestedUrls.push(url.toString());
       return new Response(JSON.stringify({
@@ -581,7 +673,7 @@ test('official store client calls GetOwnedGames with input_json-only steamid and
   const requestedUrls: string[] = [];
   const client = new OfficialStoreClient({
     steamWebApiKey: 'test-key',
-    fetchImpl: async (input) => {
+    fetchImpl: async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       requestedUrls.push(url.toString());
       return new Response(JSON.stringify({
@@ -657,7 +749,7 @@ test('official store client calls PrioritizeAppsForUser with input_json request 
   const requestedUrls: string[] = [];
   const client = new OfficialStoreClient({
     steamWebApiKey: 'test-key',
-    fetchImpl: async (input) => {
+    fetchImpl: async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       requestedUrls.push(url.toString());
       return new Response(JSON.stringify({
@@ -756,7 +848,7 @@ test('official store client calls GetRecentlyPlayedGames with input_json-only st
   const requestedUrls: string[] = [];
   const client = new OfficialStoreClient({
     steamWebApiKey: 'test-key',
-    fetchImpl: async (input) => {
+    fetchImpl: async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       requestedUrls.push(url.toString());
       return new Response(JSON.stringify({

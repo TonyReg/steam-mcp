@@ -294,6 +294,25 @@ export interface OfficialStoreItemsToFeatureOptions {
   countryCode?: string;
 }
 
+export interface OfficialStoreListsOptions {
+  count?: number;
+  start?: number;
+  returnMetadataOnly?: boolean;
+}
+
+export interface OfficialStoreCuratorListSummary {
+  listId: string;
+  title: string;
+  curatorName?: string;
+  curatorSteamId?: string;
+  description?: string;
+  appCount?: number;
+}
+
+export interface OfficialStoreListsResult {
+  lists: OfficialStoreCuratorListSummary[];
+}
+
 export interface OfficialStoreQueryItemsOptions {
   limit?: number;
   types?: Array<'game' | 'software' | 'dlc'>;
@@ -440,4 +459,17 @@ export interface SteamFeaturedScoutResult {
   marketingBucket: OfficialStoreItemsToFeatureFamily;
   filtersApplied: string[];
   storeUrl: string;
+}
+
+export interface SteamCuratorDiscoveryResult {
+  listId: string;
+  title: string;
+  source: 'curation';
+  ordering: 'curation';
+  method: 'getLists';
+  filtersApplied: string[];
+  curatorName?: string;
+  curatorSteamId?: string;
+  description?: string;
+  appCount?: number;
 }
