@@ -10,6 +10,8 @@ import type {
   OfficialStoreAppSummary,
   OfficialStoreItemsOptions,
   OfficialStoreItemsResult,
+  OfficialStoreItemsToFeatureOptions,
+  OfficialStoreItemsToFeatureResult,
   OfficialStoreItemSummary,
   OfficialStorePrioritizeAppsOptions,
   OfficialStorePrioritizeAppsResult,
@@ -78,6 +80,21 @@ export class OfficialStoreClient {
       'Official store items request failed'
     );
     return normalizeOfficialStoreItems(response);
+  }
+
+  async getItemsToFeature(request: OfficialStoreItemsToFeatureOptions = {}): Promise<OfficialStoreItemsToFeatureResult> {
+    const response = await this.fetchServiceInterfaceJson(
+      'https://api.steampowered.com/IStoreMarketingService/GetItemsToFeature/v1/',
+      {
+        context: {
+          language: request.language ?? 'english',
+          country_code: request.countryCode ?? 'US'
+        }
+      },
+      'Steam Web API key is required for official store marketing access. Set STEAM_API_KEY.',
+      'Official store marketing request failed'
+    );
+    return normalizeOfficialStoreItemsToFeature(response);
   }
 
   async queryItems(request: OfficialStoreQueryItemsOptions): Promise<OfficialStoreQueryItemsResult> {
@@ -247,6 +264,25 @@ function normalizeOfficialStoreItems(payload: unknown): OfficialStoreItemsResult
   return { items };
 }
 
+function normalizeOfficialStoreItemsToFeature(payload: unknown): OfficialStoreItemsToFeatureResult {
+  if (!isRecord(payload) || !isRecord(payload.response)) {
+    return {
+      spotlights: [],
+      daily_deals: [],
+      specials: [],
+      purchase_recommendations: []
+    };
+  }
+
+  const response = payload.response;
+  return {
+    spotlights: normalizeOfficialStoreFeaturedFamily(response.spotlights),
+    daily_deals: normalizeOfficialStoreFeaturedFamily(response.daily_deals),
+    specials: normalizeOfficialStoreFeaturedFamily(response.specials),
+    purchase_recommendations: normalizeOfficialStoreFeaturedFamily(response.purchase_recommendations)
+  };
+}
+
 function normalizeOfficialStoreAppList(payload: unknown): OfficialStoreAppListResult {
   if (!isRecord(payload) || !isRecord(payload.response)) {
     return { apps: [], haveMoreResults: false, lastAppId: undefined };
@@ -345,6 +381,52 @@ function normalizeOfficialStoreApp(payload: unknown): OfficialStoreAppSummary[] 
     lastModified: toNumber(payload.last_modified),
     priceChangeNumber: toNumber(payload.price_change_number)
   } satisfies OfficialStoreAppSummary];
+}
+
+function normalizeOfficialStoreFeaturedFamily(payload: unknown): number[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  const appIds: number[] = [];
+  const seenAppIds = new Set<number>();
+
+  for (const entry of payload) {
+    const appId = readOfficialStoreFeaturedAppId(entry);
+    if (!appId || seenAppIds.has(appId)) {
+      continue;
+    }
+
+    seenAppIds.add(appId);
+    appIds.push(appId);
+  }
+
+  return appIds;
+}
+
+function readOfficialStoreFeaturedAppId(payload: unknown): number | undefined {
+  if (typeof payload === 'number') {
+    return payload > 0 ? payload : undefined;
+  }
+
+  if (!isRecord(payload)) {
+    return undefined;
+  }
+
+  const directAppId = toNumber(payload.appid)
+    ?? toNumber(payload.app_id)
+    ?? toNumber(payload.id);
+  if (directAppId) {
+    return directAppId;
+  }
+
+  if (isRecord(payload.item)) {
+    return toNumber(payload.item.appid)
+      ?? toNumber(payload.item.app_id)
+      ?? toNumber(payload.item.id);
+  }
+
+  return undefined;
 }
 
 function readOfficialStoreNamedStrings(value: unknown): string[] | undefined {

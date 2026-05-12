@@ -289,6 +289,11 @@ export interface OfficialStoreItemsOptions {
   countryCode?: string;
 }
 
+export interface OfficialStoreItemsToFeatureOptions {
+  language?: string;
+  countryCode?: string;
+}
+
 export interface OfficialStoreQueryItemsOptions {
   limit?: number;
   types?: Array<'game' | 'software' | 'dlc'>;
@@ -319,6 +324,15 @@ export interface OfficialStoreItemSummary {
 
 export interface OfficialStoreItemsResult {
   items: OfficialStoreItemSummary[];
+}
+
+export type OfficialStoreItemsToFeatureFamily = 'spotlights' | 'daily_deals' | 'specials' | 'purchase_recommendations';
+
+export interface OfficialStoreItemsToFeatureResult {
+  spotlights: number[];
+  daily_deals: number[];
+  specials: number[];
+  purchase_recommendations: number[];
 }
 
 export interface OfficialStoreQueryItemsResult {
@@ -409,6 +423,21 @@ export interface SteamReleaseScoutResult {
   freeToPlay?: boolean;
   source: 'query' | 'charts';
   ordering: 'query' | 'charts';
+  filtersApplied: string[];
+  storeUrl: string;
+}
+
+export interface SteamFeaturedScoutResult {
+  appId: number;
+  name: string;
+  type: 'game' | 'software' | 'dlc';
+  releaseDate?: string;
+  comingSoon: boolean;
+  freeToPlay?: boolean;
+  source: 'marketing';
+  ordering: 'marketing';
+  method: 'itemsToFeature';
+  marketingBucket: OfficialStoreItemsToFeatureFamily;
   filtersApplied: string[];
   storeUrl: string;
 }

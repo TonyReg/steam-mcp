@@ -73,6 +73,65 @@ test('official store client surfaces non-ok HTTP failures for charts requests', 
   await assert.rejects(() => client.getTopReleasesPages(), /Official top releases request failed with status 503\./);
 });
 
+test('official store client calls GetItemsToFeature with input_json locale payload and normalizes marketing families', async () => {
+  const requestedUrls: string[] = [];
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      requestedUrls.push(url.toString());
+      return new Response(JSON.stringify({
+        response: {
+          spotlights: [{ appid: 620 }, { appid: 730 }, { appid: 620 }],
+          daily_deals: [{ appid: 440 }],
+          specials: [{ item: { appid: 570 } }, { id: 500 }],
+          purchase_recommendations: [730, { app_id: 2051120 }]
+        }
+      }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }
+  });
+
+  const result = await client.getItemsToFeature({ language: 'japanese', countryCode: 'JP' });
+
+  assert.deepEqual(result, {
+    spotlights: [620, 730],
+    daily_deals: [440],
+    specials: [570, 500],
+    purchase_recommendations: [730, 2051120]
+  });
+
+  const requestUrl = new URL(requestedUrls[0] ?? '');
+  assert.equal(requestUrl.toString().startsWith('https://api.steampowered.com/IStoreMarketingService/GetItemsToFeature/v1/'), true);
+  assert.equal(requestUrl.searchParams.get('key'), 'test-key');
+  assert.equal(requestUrl.searchParams.get('format'), 'json');
+  const inputJson = JSON.parse(requestUrl.searchParams.get('input_json') ?? '{}') as Record<string, unknown>;
+  assert.deepEqual(inputJson, {
+    context: {
+      language: 'japanese',
+      country_code: 'JP'
+    }
+  });
+});
+
+test('official store client rejects marketing calls when no API key is configured', async () => {
+  const client = new OfficialStoreClient({
+    fetchImpl: async () => {
+      throw new Error('fetch should not run');
+    }
+  });
+
+  await assert.rejects(() => client.getItemsToFeature(), /STEAM_API_KEY/);
+});
+
+test('official store client surfaces non-ok HTTP failures for marketing requests', async () => {
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async () => new Response('upstream failure', { status: 502 })
+  });
+
+  await assert.rejects(() => client.getItemsToFeature(), /Official store marketing request failed with status 502\./);
+});
+
 test('official store client calls GetItems with input_json request payload and normalizes live-shaped items', async () => {
   const requestedUrls: string[] = [];
   const client = new OfficialStoreClient({
