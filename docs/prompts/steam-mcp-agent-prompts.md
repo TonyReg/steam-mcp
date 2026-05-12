@@ -108,25 +108,6 @@ Recommended flow:
 
 This workflow depends on `STEAM_API_KEY`. If `steam_status` reports that the key is unavailable, stop and ask for configuration instead of improvising with unauthenticated substitutes. When facet filtering is active, explain that results are bounded post-filtering over the candidate window, so fewer than the requested limit may still be returned. When `includeFacets=true`, explain that `facetsAvailable=false` means the item remained valid but no facet payload could be attached for that result.
 
-### `steam_curator_discovery`
-
-Use this when an agent should browse authenticated official Steam curator/list summaries through metadata-only `GetLists`.
-
-Arguments:
-
-- `limit` (optional string integer, for example `"20"`; defaults to `20` in the prompt guidance)
-- `start` (optional string integer, for example `"40"`; defaults to `0` in the prompt guidance)
-
-Recommended flow:
-
-1. `steam_status`
-2. `steam_curator_discovery`
-3. Use `limit` and `start` only to page the official curator/list summary feed while preserving upstream ordering.
-4. Use `steam_export` for JSON or Markdown handoff, and use `steam_link_generate` only when enough identifiers already exist for useful follow-up links.
-5. Switch to `steam_featured_scout` for featured/editorial placements and `steam_release_scout` for release-specific scouting.
-
-This workflow depends on `STEAM_API_KEY`. If `steam_status` reports that the key is unavailable, stop and ask for configuration instead of improvising with unauthenticated substitutes. This bounded slice uses `GetLists` in metadata-only mode, returns curator/list summaries only, and does not expose per-list app details yet.
-
 ### `steam_featured_scout`
 
 Use this when an agent should scout authenticated official Steam featured/editorial marketing placements through `GetItemsToFeature`.

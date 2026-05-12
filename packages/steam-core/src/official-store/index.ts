@@ -8,14 +8,11 @@ import type {
   OfficialStoreAppListOptions,
   OfficialStoreAppListResult,
   OfficialStoreAppSummary,
-  OfficialStoreCuratorListSummary,
   OfficialStoreItemsOptions,
   OfficialStoreItemsResult,
   OfficialStoreItemsToFeatureOptions,
   OfficialStoreItemsToFeatureResult,
   OfficialStoreItemSummary,
-  OfficialStoreListsOptions,
-  OfficialStoreListsResult,
   OfficialStorePrioritizeAppsOptions,
   OfficialStorePrioritizeAppsResult,
   OfficialStorePrioritizedAppSummary,
@@ -100,19 +97,6 @@ export class OfficialStoreClient {
     return normalizeOfficialStoreItemsToFeature(response);
   }
 
-  async getLists(request: OfficialStoreListsOptions = {}): Promise<OfficialStoreListsResult> {
-    const response = await this.fetchServiceInterfaceJson(
-      'https://api.steampowered.com/IStoreCurationService/GetLists/v1/',
-      {
-        count: request.count,
-        start: request.start,
-        return_metadata_only: request.returnMetadataOnly
-      },
-      'Steam Web API key is required for official store curation access. Set STEAM_API_KEY.',
-      'Official store curation request failed'
-    );
-    return normalizeOfficialStoreLists(response);
-  }
 
   async queryItems(request: OfficialStoreQueryItemsOptions): Promise<OfficialStoreQueryItemsResult> {
     const filters: Record<string, unknown> = {
@@ -300,18 +284,6 @@ function normalizeOfficialStoreItemsToFeature(payload: unknown): OfficialStoreIt
   };
 }
 
-function normalizeOfficialStoreLists(payload: unknown): OfficialStoreListsResult {
-  if (!isRecord(payload) || !isRecord(payload.response)) {
-    return { lists: [] };
-  }
-
-  const response = payload.response;
-  const lists = Array.isArray(response.lists)
-    ? response.lists.flatMap((entry) => normalizeOfficialStoreCuratorList(entry))
-    : [];
-
-  return { lists };
-}
 
 function normalizeOfficialStoreAppList(payload: unknown): OfficialStoreAppListResult {
   if (!isRecord(payload) || !isRecord(payload.response)) {
@@ -413,42 +385,6 @@ function normalizeOfficialStoreApp(payload: unknown): OfficialStoreAppSummary[] 
   } satisfies OfficialStoreAppSummary];
 }
 
-function normalizeOfficialStoreCuratorList(payload: unknown): OfficialStoreCuratorListSummary[] {
-  if (!isRecord(payload)) {
-    return [];
-  }
-
-  const listId = readOfficialStoreStringId(payload.listid)
-    ?? readOfficialStoreStringId(payload.list_id)
-    ?? readOfficialStoreStringId(payload.id);
-  const title = readOfficialStoreTrimmedString(payload.title)
-    ?? readOfficialStoreTrimmedString(payload.name);
-
-  if (!listId || !title) {
-    return [];
-  }
-
-  const creator = isRecord(payload.creator) ? payload.creator : undefined;
-  const curatorName = readOfficialStoreTrimmedString(payload.curator_name)
-    ?? readOfficialStoreTrimmedString(payload.creator_name)
-    ?? readOfficialStoreTrimmedString(creator?.name);
-  const curatorSteamId = readOfficialStoreStringId(payload.curator_steamid)
-    ?? readOfficialStoreStringId(payload.curator_steam_id)
-    ?? readOfficialStoreStringId(creator?.steamid)
-    ?? readOfficialStoreStringId(creator?.steam_id);
-  const description = readOfficialStoreTrimmedString(payload.description)
-    ?? readOfficialStoreTrimmedString(payload.blurb);
-  const appCount = toNumber(payload.app_count) ?? toNumber(payload.item_count);
-
-  return [{
-    listId,
-    title,
-    ...(curatorName === undefined ? {} : { curatorName }),
-    ...(curatorSteamId === undefined ? {} : { curatorSteamId }),
-    ...(description === undefined ? {} : { description }),
-    ...(appCount === undefined ? {} : { appCount })
-  } satisfies OfficialStoreCuratorListSummary];
-}
 
 function normalizeOfficialStoreFeaturedFamily(payload: unknown): number[] {
   if (!Array.isArray(payload)) {
