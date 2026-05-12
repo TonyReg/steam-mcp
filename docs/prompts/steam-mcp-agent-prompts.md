@@ -78,6 +78,36 @@ Recommended flow:
 
 This workflow depends on a discoverable selected Steam user, a resolvable SteamID64, and `STEAM_API_KEY`. If `steam_status` reports any of those prerequisites missing, stop and ask for configuration or user-selection correction instead of improvising.
 
+### `steam_store_query`
+
+Use this when an agent should query the authenticated official Steam catalog with bounded filters, optional authoritative human-readable facet filtering, and optional facet enrichment.
+
+Arguments:
+
+- `limit` (optional string integer, for example `"20"`)
+- `types` (optional comma-separated string, for example `"game,dlc"`)
+- `language` (optional Steam language string, for example `"schinese"` or `"japanese"`)
+- `countryCode` (optional Steam country code string, for example `"US"` or `"JP"`)
+- `comingSoonOnly` (optional boolean string: `"true"` or `"false"`)
+- `freeToPlay` (optional boolean string: `"true"` or `"false"`)
+- `includeFacets` (optional boolean string: `"true"` or `"false"`)
+- `genres` (optional comma-separated string, for example `"puzzle,adventure"`)
+- `categories` (optional comma-separated string, for example `"single-player,co-op"`)
+- `tags` (optional comma-separated string, for example `"story rich,cozy"`)
+- `genresExclude` (optional comma-separated string, for example `"horror,anime"`)
+- `categoriesExclude` (optional comma-separated string, for example `"multi-player,vr"`)
+- `tagsExclude` (optional comma-separated string, for example `"survival,roguelike"`)
+
+Recommended flow:
+
+1. `steam_status`
+2. `steam_store_query`
+3. Use optional locale, release-state, pricing-model, and include/exclude facet filters only when the user explicitly wants them; includes are OR within a facet family and AND across different facet families, and any matching exclude facet removes the candidate after authoritative comparison
+4. `steam_store_search`, `steam_release_scout`, `steam_find_similar`, or `steam_link_generate` when comparison, scouting, or direct links are useful
+5. `steam_export`
+
+This workflow depends on `STEAM_API_KEY`. If `steam_status` reports that the key is unavailable, stop and ask for configuration instead of improvising with unauthenticated substitutes. When facet filtering is active, explain that results are bounded post-filtering over the candidate window, so fewer than the requested limit may still be returned. When `includeFacets=true`, explain that `facetsAvailable=false` means the item remained valid but no facet payload could be attached for that result.
+
 ### `steam_release_scout`
 
 Use this when an agent should scout upcoming or newly released Steam catalog apps through the authenticated official catalog path.

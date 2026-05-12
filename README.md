@@ -72,6 +72,7 @@ If your MCP client supports prompts, `steam-mcp` includes built-in workflows for
 - `steam_collection_planner` — plan-first collection or hidden-state changes with protected-collection awareness
 - `steam_deck_backlog_triage` — shortlist Steam Deck-friendly backlog candidates
 - `steam_recently_played` — read-only workflow for inspecting recent play history for the selected Steam user
+- `steam_store_query` — read-only authenticated official catalog discovery that preserves official defaults when optional filters are omitted, supports bounded include/exclude facet filtering, and offers opt-in facet enrichment
 - `steam_release_scout` — read-only workflow for upcoming or newly released Steam catalog scouting
 
 ## Environment variables
@@ -107,7 +108,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 | `steam_library_list` | Enumerate owned games with filters such as collections, favorites, play state, and Deck status |
 | `steam_library_search` | Search the local library with deterministic match reasons |
 | `steam_store_search` | Search the public Steam store without authenticated session reuse |
-| `steam_store_query` | Query the authenticated official Steam catalog with bounded type, release-state, free-to-play, and human-readable genre/category/tag filters; requires a Steam Web API key |
+| `steam_store_query` | Query the authenticated official Steam catalog while preserving official defaults for omitted filters, with bounded type, locale, release-state, free-to-play, and human-readable include/exclude facet filters plus opt-in facet enrichment; requires a Steam Web API key |
 | `steam_release_scout` | Read-only upcoming/recent release scouting via official catalog access plus public appdetails enrichment, with optional locale passthrough and bounded human-readable facet filters; requires a Steam Web API key |
 | `steam_recently_played` | Read-only recently played game listing via the official Steam Web API; requires a Steam Web API key |
 | `steam_find_similar` | Rank similar library or store candidates with deterministic ranking by default and optional official store prioritization for `scope="store"` or `scope="both"` |
@@ -121,7 +122,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 - This is a local `stdio` MCP server, not a hosted service
 - The project is Windows-first and assumes a local Steam installation
 - Steam store and Steam Deck data are used as read-only enrichment sources
-- `steam_store_query` is read-only, requires `STEAM_API_KEY`, supports bounded human-readable genre/category/tag filtering via authoritative cacheable store details, and complements the unauthenticated public-store `steam_store_search` path
+- `steam_store_query` is read-only, requires `STEAM_API_KEY`, preserves official client defaults when optional filters are omitted, supports bounded human-readable include/exclude genre/category/tag filtering via authoritative cacheable store details, treats `includeFacets` as opt-in enrichment only, may still return fewer than the requested limit after bounded post-filtering, uses `facetsAvailable=false` when no facet payload could be attached for an otherwise valid item, and complements the unauthenticated public-store `steam_store_search` path
 - `steam_release_scout` is read-only and fails explicitly when no Steam Web API key is available
 - `steam_recently_played` is read-only and fails explicitly when no Steam Web API key is available or no selected Steam user can be resolved
 - `steam_find_similar` defaults to deterministic ranking; `mode="official"` is opt-in, only works with `scope="store"` or `scope="both"`, and fails explicitly when `STEAM_API_KEY` is unavailable or the selected user cannot be resolved to a SteamID64
