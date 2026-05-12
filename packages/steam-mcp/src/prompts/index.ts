@@ -60,6 +60,14 @@ const steamReleaseScoutPromptArgs = {
 };
 const steamReleaseScoutPromptSchema = z.object(steamReleaseScoutPromptArgs);
 
+const steamFeaturedScoutPromptArgs = {
+  limit: z.string().optional().describe('Optional integer result limit as a string, for example "20".'),
+  types: z.string().optional().describe('Optional comma-separated featured item types string, for example "game,software".'),
+  language: z.string().optional().describe('Optional Steam language string, for example "schinese" or "japanese".'),
+  countryCode: z.string().optional().describe('Optional Steam country code string, for example "US" or "JP".')
+};
+const steamFeaturedScoutPromptSchema = z.object(steamFeaturedScoutPromptArgs);
+
 function parseSteamReleaseScoutPromptLimit(rawLimit: string | undefined): number | undefined {
   const trimmed = rawLimit?.trim();
   if (!trimmed) {
@@ -376,6 +384,51 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               '8. If the user wants simpler unauthenticated lookup, switch to steam_store_search. If they want release-specific scouting, switch to steam_release_scout. If they want comparison or follow-up recommendations on returned titles, use steam_find_similar or steam_link_generate as needed.',
               '9. Use steam_export when the user wants a JSON or Markdown handoff of the filtered catalog results.',
               '10. Keep the reasoning explicit: release state, type filters, locale context, pricing model, include/exclude facet filters, additive metadata, and optional facet enrichment.'
+            ].join('\n')
+          }
+        }]
+      };
+    }
+  );
+
+  registerPromptShallow(
+    server,
+    'steam_featured_scout',
+    {
+      title: 'Steam featured scout',
+      description: 'Guide an agent through read-only authenticated official marketing-backed featured/editorial discovery.',
+      argsSchema: steamFeaturedScoutPromptArgs
+    },
+    (rawArgs: unknown) => {
+      const parsedArgs = steamFeaturedScoutPromptSchema.parse(rawArgs);
+      const limit = parseSteamReleaseScoutPromptLimit(parsedArgs.limit);
+      const types = parseSteamReleaseScoutPromptTypes(parsedArgs.types);
+      const language = parseSteamReleaseScoutPromptText(parsedArgs.language);
+      const countryCode = parseSteamReleaseScoutPromptText(parsedArgs.countryCode);
+      const selectedTypes = types?.length ? types.join(', ') : 'game, software, dlc';
+
+      return {
+        description: 'Read-only workflow for scouting authenticated official Steam featured/editorial marketing placements.',
+        messages: [{
+          role: 'user',
+          content: {
+            type: 'text',
+            text: [
+              'Use the Steam MCP to scout featured Steam store placements safely.',
+              `Requested result limit: ${limit ?? 20}.`,
+              `Requested featured item types: ${selectedTypes}.`,
+              language ? `Requested language: ${language}.` : 'Requested language: default official client locale.',
+              countryCode ? `Requested country code: ${countryCode}.` : 'Requested country code: default official client locale.',
+              'Workflow:',
+              '1. Call steam_status first and confirm the detected Steam user and whether the Steam Web API key is available in MCP runtime.',
+              '2. Use steam_featured_scout for the primary featured/editorial scouting pass. Keep the workflow read-only and marketing-backed.',
+              '3. Explain that steam_featured_scout uses authenticated official marketing placements from GetItemsToFeature and then enriches them with official store item metadata.',
+              '4. When useful, pass language and countryCode to scope the official marketing request to a specific locale context without changing the result shape.',
+              '5. Use types to keep only the requested app families after official enrichment; explain that the returned results preserve marketing ordering after enrichment, deduplication, and bounded filtering.',
+              '6. If the user wants release-specific scouting, switch to steam_release_scout. Do not treat release scouting as a substitute for featured/editorial discovery.',
+              '7. If the user wants broader authenticated catalog filtering, switch to steam_store_query. If they want unauthenticated public-store lookup, switch to steam_store_search.',
+              '8. Use steam_export when the user wants a JSON or Markdown handoff of the featured shortlist, and use steam_link_generate for store links.',
+              '9. If steam_status or steam_featured_scout reports that the Steam Web API key is unavailable, tell the user that steam_featured_scout requires official authenticated access via `STEAM_API_KEY` and stop instead of improvising with charts or release-query substitutes.'
             ].join('\n')
           }
         }]

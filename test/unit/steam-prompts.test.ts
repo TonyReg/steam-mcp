@@ -124,3 +124,37 @@ test('steam store query prompt uses default guidance when optional filters are o
   assert.match(text, /Requested genre filters: none/);
   assert.match(text, /Excluded tag filters: none/);
 });
+
+test('steam featured scout prompt renders featured/editorial routing and authenticated prerequisite guidance', async () => {
+  const harness = createPromptHarness();
+
+  const result = await harness.invoke('steam_featured_scout', {
+    limit: '8',
+    types: 'game,software',
+    language: 'japanese',
+    countryCode: 'JP'
+  });
+  const text = renderFirstPromptText(result);
+
+  assert.match(text, /Requested result limit: 8/);
+  assert.match(text, /Requested featured item types: game, software/);
+  assert.match(text, /Requested language: japanese/);
+  assert.match(text, /Requested country code: JP/);
+  assert.match(text, /steam_featured_scout/);
+  assert.match(text, /GetItemsToFeature/);
+  assert.match(text, /preserve marketing ordering after enrichment, deduplication, and bounded filtering/);
+  assert.match(text, /steam_release_scout/);
+  assert.match(text, /STEAM_API_KEY/);
+});
+
+test('steam featured scout prompt uses default bounded guidance when optional args are omitted', async () => {
+  const harness = createPromptHarness();
+
+  const result = await harness.invoke('steam_featured_scout', {});
+  const text = renderFirstPromptText(result);
+
+  assert.match(text, /Requested result limit: 20/);
+  assert.match(text, /Requested featured item types: game, software, dlc/);
+  assert.match(text, /Requested language: default official client locale/);
+  assert.match(text, /Requested country code: default official client locale/);
+});
