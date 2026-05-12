@@ -108,6 +108,28 @@ Recommended flow:
 
 This workflow depends on `STEAM_API_KEY`. If `steam_status` reports that the key is unavailable, stop and ask for configuration instead of improvising with unauthenticated substitutes. When facet filtering is active, explain that results are bounded post-filtering over the candidate window, so fewer than the requested limit may still be returned. When `includeFacets=true`, explain that `facetsAvailable=false` means the item remained valid but no facet payload could be attached for that result.
 
+### `steam_featured_scout`
+
+Use this when an agent should scout authenticated official Steam featured/editorial marketing placements through `GetItemsToFeature`.
+
+Arguments:
+
+- `limit` (optional string integer, for example `"20"`; defaults to `20` in the prompt guidance)
+- `types` (optional comma-separated string, for example `"game,software"`; defaults to `game,software,dlc` in the prompt guidance)
+- `language` (optional Steam language string, for example `"schinese"` or `"japanese"`)
+- `countryCode` (optional Steam country code string, for example `"US"` or `"JP"`)
+
+Recommended flow:
+
+1. `steam_status`
+2. `steam_featured_scout`
+3. Use optional `language` / `countryCode` when the user wants locale-scoped official marketing results; otherwise keep the official client defaults.
+4. Use optional `types` when the user wants to keep only specific app families after official enrichment; explain that returned results preserve marketing ordering after enrichment, deduplication, and bounded filtering.
+5. Switch to `steam_release_scout` for release-specific scouting, `steam_store_query` for broader authenticated catalog filtering, and `steam_store_search` for unauthenticated public-store lookup.
+6. `steam_export` and `steam_link_generate` when handoff or direct store links are useful.
+
+This workflow depends on `STEAM_API_KEY`. If `steam_status` reports that the key is unavailable, stop and ask for configuration instead of improvising with charts or release-query substitutes.
+
 ### `steam_release_scout`
 
 Use this when an agent should scout upcoming or newly released Steam catalog apps through the authenticated official catalog path.
