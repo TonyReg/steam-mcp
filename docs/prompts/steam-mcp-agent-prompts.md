@@ -73,12 +73,15 @@ Arguments:
 - `countryCode` (optional Steam country code string, for example `"US"` or `"JP"`)
 - `comingSoonOnly` (optional boolean string: `"true"` or `"false"`; defaults to `true` in the prompt guidance)
 - `freeToPlay` (optional boolean string: `"true"` or `"false"`)
+- `genres` (optional comma-separated string, for example `"puzzle,adventure"`)
+- `categories` (optional comma-separated string, for example `"single-player,co-op"`)
+- `tags` (optional comma-separated string, for example `"story rich,co-op"`)
 
 Recommended flow:
 
 1. `steam_status`
 2. `steam_release_scout`
-3. Use optional `language` / `countryCode` when the user wants locale-scoped official catalog results, and optional `freeToPlay` when they want to narrow by pricing model
+3. Use optional `language` / `countryCode` when the user wants locale-scoped official catalog results, optional `freeToPlay` when they want to narrow by pricing model, and optional `genres` / `categories` / `tags` when they want human-readable facet filtering (OR within a family, AND across families)
 4. `steam_store_search`, `steam_find_similar`, or `steam_link_generate` when deeper comparison or links are useful; `steam_find_similar` can stay deterministic or use optional official prioritization for store-side comparison only with `mode="official"`, `scope="store"` or `scope="both"`, and a resolvable selected user
 5. `steam_export` for JSON or Markdown handoff
 
