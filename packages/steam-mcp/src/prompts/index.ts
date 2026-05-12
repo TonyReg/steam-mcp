@@ -27,6 +27,23 @@ const steamRecentlyPlayedPromptArgs = {
 };
 const steamRecentlyPlayedPromptSchema = z.object(steamRecentlyPlayedPromptArgs);
 
+const steamStoreQueryPromptArgs = {
+  limit: z.string().optional().describe('Optional integer result limit as a string, for example "20".'),
+  types: z.string().optional().describe('Optional comma-separated store item types string, for example "game,dlc".'),
+  language: z.string().optional().describe('Optional Steam language string, for example "schinese" or "japanese".'),
+  countryCode: z.string().optional().describe('Optional Steam country code string, for example "US" or "JP".'),
+  comingSoonOnly: z.string().optional().describe('Optional boolean string: "true" or "false".'),
+  freeToPlay: z.string().optional().describe('Optional boolean string: "true" or "false" to require free-to-play or paid results.'),
+  includeFacets: z.string().optional().describe('Optional boolean string: "true" or "false" to request per-item human-readable facets.'),
+  genres: z.string().optional().describe('Optional comma-separated genre filters string, for example "puzzle,adventure".'),
+  categories: z.string().optional().describe('Optional comma-separated category filters string, for example "single-player,co-op".'),
+  tags: z.string().optional().describe('Optional comma-separated tag filters string, for example "story rich,co-op".'),
+  genresExclude: z.string().optional().describe('Optional comma-separated excluded genre filters string, for example "horror,anime".'),
+  categoriesExclude: z.string().optional().describe('Optional comma-separated excluded category filters string, for example "multi-player,vr".'),
+  tagsExclude: z.string().optional().describe('Optional comma-separated excluded tag filters string, for example "survival,roguelike".')
+};
+const steamStoreQueryPromptSchema = z.object(steamStoreQueryPromptArgs);
+
 const steamReleaseScoutPromptTypeSchema = z.enum(['game', 'software', 'dlc']);
 type SteamReleaseScoutPromptType = z.infer<typeof steamReleaseScoutPromptTypeSchema>;
 
@@ -53,6 +70,15 @@ function parseSteamReleaseScoutPromptLimit(rawLimit: string | undefined): number
 }
 
 function parseSteamRecentlyPlayedPromptLimit(rawLimit: string | undefined): number | undefined {
+  const trimmed = rawLimit?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return z.coerce.number().int().min(1).max(100).parse(trimmed);
+}
+
+function parseSteamStoreQueryPromptLimit(rawLimit: string | undefined): number | undefined {
   const trimmed = rawLimit?.trim();
   if (!trimmed) {
     return undefined;
@@ -89,6 +115,14 @@ function parseSteamReleaseScoutPromptComingSoonOnly(rawComingSoonOnly: string | 
   return z.enum(['true', 'false']).transform((value) => value === 'true').parse(trimmed);
 }
 
+function parseSteamStoreQueryPromptBoolean(rawValue: string | undefined): boolean | undefined {
+  const trimmed = rawValue?.trim().toLowerCase();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return z.enum(['true', 'false']).transform((value) => value === 'true').parse(trimmed);
+}
 
 function parseSteamReleaseScoutPromptFreeToPlay(rawFreeToPlay: string | undefined): boolean | undefined {
   const trimmed = rawFreeToPlay?.trim().toLowerCase();
@@ -100,6 +134,34 @@ function parseSteamReleaseScoutPromptFreeToPlay(rawFreeToPlay: string | undefine
 }
 
 function parseSteamReleaseScoutPromptFacetValues(rawValue: string | undefined): string[] | undefined {
+  const trimmed = rawValue?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const values = trimmed
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter((value): value is string => value.length > 0);
+
+  return values.length > 0 ? values : undefined;
+}
+
+function parseSteamStoreQueryPromptTypes(rawTypes: string | undefined): SteamReleaseScoutPromptType[] | undefined {
+  const trimmed = rawTypes?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const values = trimmed.split(',').map((value) => value.trim()).filter((value): value is string => value.length > 0);
+  if (values.length === 0) {
+    return undefined;
+  }
+
+  return z.array(steamReleaseScoutPromptTypeSchema).parse(values);
+}
+
+function parseSteamStoreQueryPromptFacetValues(rawValue: string | undefined): string[] | undefined {
   const trimmed = rawValue?.trim();
   if (!trimmed) {
     return undefined;
@@ -250,6 +312,70 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               '6. If the user wants more context on recent titles, use steam_find_similar for overlap or follow-up recommendations, steam_store_search for storefront context, and steam_link_generate for direct store or launch links.',
               '7. Use steam_export when the user wants a JSON or Markdown handoff of the recent-play list.',
               '8. Explain results in explicit terms such as playtime over the last two weeks, lifetime playtime, app identity, and the selected-user context.'
+            ].join('\n')
+          }
+        }]
+      };
+    }
+  );
+
+  registerPromptShallow(
+    server,
+    'steam_store_query',
+    {
+      title: 'Steam store query',
+      description: 'Guide an agent through read-only authenticated official catalog discovery with bounded filters, optional human-readable facet filtering, and optional facet enrichment.',
+      argsSchema: steamStoreQueryPromptArgs
+    },
+    (rawArgs: unknown) => {
+      const parsedArgs = steamStoreQueryPromptSchema.parse(rawArgs);
+      const limit = parseSteamStoreQueryPromptLimit(parsedArgs.limit);
+      const types = parseSteamStoreQueryPromptTypes(parsedArgs.types);
+      const language = parseSteamReleaseScoutPromptText(parsedArgs.language);
+      const countryCode = parseSteamReleaseScoutPromptText(parsedArgs.countryCode);
+      const comingSoonOnly = parseSteamStoreQueryPromptBoolean(parsedArgs.comingSoonOnly);
+      const freeToPlay = parseSteamStoreQueryPromptBoolean(parsedArgs.freeToPlay);
+      const includeFacets = parseSteamStoreQueryPromptBoolean(parsedArgs.includeFacets);
+      const genres = parseSteamStoreQueryPromptFacetValues(parsedArgs.genres);
+      const categories = parseSteamStoreQueryPromptFacetValues(parsedArgs.categories);
+      const tags = parseSteamStoreQueryPromptFacetValues(parsedArgs.tags);
+      const genresExclude = parseSteamStoreQueryPromptFacetValues(parsedArgs.genresExclude);
+      const categoriesExclude = parseSteamStoreQueryPromptFacetValues(parsedArgs.categoriesExclude);
+      const tagsExclude = parseSteamStoreQueryPromptFacetValues(parsedArgs.tagsExclude);
+      const selectedTypes = types?.length ? types.join(', ') : undefined;
+
+      return {
+        description: 'Read-only workflow for querying the authenticated official Steam catalog with bounded filters and optional human-readable facet enrichment.',
+        messages: [{
+          role: 'user',
+          content: {
+            type: 'text',
+            text: [
+              'Use the Steam MCP to query the authenticated official Steam catalog safely.',
+              limit === undefined ? 'Requested result limit: leave unset so official client defaults apply.' : `Requested result limit: ${limit}.`,
+              selectedTypes ? `Requested store item types: ${selectedTypes}.` : 'Requested store item types: no explicit type filter.',
+              language ? `Requested language: ${language}.` : 'Requested language: leave unset so the official client locale default applies.',
+              countryCode ? `Requested country code: ${countryCode}.` : 'Requested country code: leave unset so the official client country default applies.',
+              comingSoonOnly === undefined ? 'Coming soon only filter: leave unset so official client defaults apply.' : `Coming soon only filter: ${comingSoonOnly}.`,
+              freeToPlay === undefined ? 'Free to play filter: no explicit filter.' : `Free to play filter: ${freeToPlay}.`,
+              includeFacets === undefined ? 'Include human-readable facets: false unless explicitly requested.' : `Include human-readable facets: ${includeFacets}.`,
+              genres === undefined ? 'Requested genre filters: none.' : `Requested genre filters: ${genres.join(', ')}.`,
+              categories === undefined ? 'Requested category filters: none.' : `Requested category filters: ${categories.join(', ')}.`,
+              tags === undefined ? 'Requested tag filters: none.' : `Requested tag filters: ${tags.join(', ')}.`,
+              genresExclude === undefined ? 'Excluded genre filters: none.' : `Excluded genre filters: ${genresExclude.join(', ')}.`,
+              categoriesExclude === undefined ? 'Excluded category filters: none.' : `Excluded category filters: ${categoriesExclude.join(', ')}.`,
+              tagsExclude === undefined ? 'Excluded tag filters: none.' : `Excluded tag filters: ${tagsExclude.join(', ')}.`,
+              'Workflow:',
+              '1. Call steam_status first and confirm the detected Steam user and whether `STEAM_API_KEY` is available for authenticated official catalog access.',
+              '2. If steam_status reports that STEAM_API_KEY is unavailable, stop and tell the user that steam_store_query requires authenticated official catalog access.',
+              '3. Use steam_store_query for the primary read-only discovery pass when the user needs authenticated official filtering rather than unauthenticated public store lookup.',
+              '4. Use language and countryCode only when the user wants locale-scoped official catalog results; otherwise keep the official client defaults.',
+              '5. Use genres, categories, tags, genresExclude, categoriesExclude, and tagsExclude only when the user wants human-readable facet filtering. Treat includes as OR within one facet family and AND across different facet families; any matching exclude facet removes the candidate after authoritative comparison.',
+              '6. Explain that facet filtering is bounded post-filtering over the candidate window, so fewer than the requested limit may still be returned.',
+              '7. Use includeFacets=true only when the user wants per-item human-readable genres, categories, and tags attached to the returned results. Explain that facetsAvailable=false means enrichment was attempted but no facet payload was attached for that item.',
+              '8. If the user wants simpler unauthenticated lookup, switch to steam_store_search. If they want release-specific scouting, switch to steam_release_scout. If they want comparison or follow-up recommendations on returned titles, use steam_find_similar or steam_link_generate as needed.',
+              '9. Use steam_export when the user wants a JSON or Markdown handoff of the filtered catalog results.',
+              '10. Keep the reasoning explicit: release state, type filters, locale context, pricing model, include/exclude facet filters, additive metadata, and optional facet enrichment.'
             ].join('\n')
           }
         }]

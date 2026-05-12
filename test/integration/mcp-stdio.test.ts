@@ -142,7 +142,8 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       'steam_deck_backlog_triage',
       'steam_library_curator',
       'steam_recently_played',
-      'steam_release_scout'
+      'steam_release_scout',
+      'steam_store_query'
     ]);
 
     const collectionPlannerPrompt = await client.getPrompt({
@@ -196,6 +197,42 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.match(JSON.stringify(releaseScoutPrompt), /Requested tag filters: story rich, cozy/);
     assert.match(JSON.stringify(releaseScoutPrompt), /OR within one facet family and AND across different facet families/);
     assert.match(JSON.stringify(releaseScoutPrompt), /STEAM_API_KEY/);
+
+    const storeQueryPrompt = await client.getPrompt({
+      name: 'steam_store_query',
+      arguments: {
+        limit: '12',
+        types: 'game,dlc',
+        language: 'japanese',
+        countryCode: 'JP',
+        comingSoonOnly: 'false',
+        freeToPlay: 'true',
+        includeFacets: 'true',
+        genres: 'Puzzle, Adventure',
+        categories: 'Single-player, Co-op',
+        tags: 'Story Rich, Cozy',
+        genresExclude: 'Horror',
+        categoriesExclude: 'Multi-player',
+        tagsExclude: 'Survival'
+      }
+    });
+    assert.match(JSON.stringify(storeQueryPrompt), /steam_store_query/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Requested result limit: 12/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Requested store item types: game, dlc/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Requested language: japanese/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Requested country code: JP/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Coming soon only filter: false/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Free to play filter: true/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Include human-readable facets: true/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Requested genre filters: puzzle, adventure/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Requested category filters: single-player, co-op/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Requested tag filters: story rich, cozy/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Excluded genre filters: horror/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Excluded category filters: multi-player/);
+    assert.match(JSON.stringify(storeQueryPrompt), /Excluded tag filters: survival/);
+    assert.match(JSON.stringify(storeQueryPrompt), /facet filtering is bounded post-filtering over the candidate window/);
+    assert.match(JSON.stringify(storeQueryPrompt), /facetsAvailable=false/);
+    assert.match(JSON.stringify(storeQueryPrompt), /STEAM_API_KEY/);
 
     const libraryCuratorPrompt = await client.getPrompt({
       name: 'steam_library_curator',
