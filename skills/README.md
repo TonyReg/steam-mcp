@@ -14,6 +14,8 @@ skills/
     SKILL.md
   steam-recently-played/
     SKILL.md
+  steam-featured-scout/
+    SKILL.md
   steam-store-query/
     SKILL.md
   steam-release-scout/
@@ -38,6 +40,10 @@ skills/
   - read-only inspection of recently played games for the selected Steam user through the official Steam Web API path
   - deterministic follow-up comparison, export, and link workflows after the recent-play pass
 
+- **`steam-featured-scout`**
+  - read-only authenticated official marketing-backed featured/editorial discovery via `GetItemsToFeature`
+  - preserves marketing ordering after official enrichment, deduplication, and bounded filtering, with export/link follow-up workflows after the featured pass
+
 - **`steam-store-query`**
   - read-only authenticated official catalog discovery that preserves official defaults when optional filters are omitted and supports bounded type, locale, release-state, free-to-play, and human-readable include/exclude facet filters
   - `includeFacets` is opt-in enrichment only; bounded post-filtering may return fewer than the requested limit, `facetsAvailable=false` means no facet payload could be attached for that item, and export/comparison/link follow-up workflows stay available
@@ -52,6 +58,7 @@ These skills are designed to sit on top of the MCP prompts already implemented i
 - `steam_collection_planner`
 - `steam_deck_backlog_triage`
 - `steam_recently_played`
+- `steam_featured_scout`
 - `steam_store_query`
 - `steam_release_scout`
 
