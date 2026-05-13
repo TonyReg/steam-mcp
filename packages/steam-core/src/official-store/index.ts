@@ -111,7 +111,6 @@ export class OfficialStoreClient {
       }
     };
 
-    // Add tag filters if provided
     if (request.tagIdsMustMatch && request.tagIdsMustMatch.length > 0) {
       filters.tagids_must_match = request.tagIdsMustMatch.map(id => ({ tagid: id }));
     }
