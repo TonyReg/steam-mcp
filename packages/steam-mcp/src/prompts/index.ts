@@ -22,6 +22,14 @@ const steamDeckBacklogPromptArgs = {
 };
 const steamDeckBacklogPromptSchema = z.object(steamDeckBacklogPromptArgs);
 
+const steamDiscoveryRouterPromptPreferredSourceSchema = z.enum(['auto', 'library', 'store', 'featured', 'releases', 'similar', 'recent']);
+const steamDiscoveryRouterPromptArgs = {
+  request: z.string().min(1),
+  limit: z.string().optional().describe('Optional integer result limit as a string, for example "10".'),
+  preferredSource: steamDiscoveryRouterPromptPreferredSourceSchema.optional().describe('Optional routing hint: auto, library, store, featured, releases, similar, or recent.')
+};
+const steamDiscoveryRouterPromptSchema = z.object(steamDiscoveryRouterPromptArgs);
+
 const steamRecentlyPlayedPromptArgs = {
   limit: z.string().optional().describe('Optional integer result limit as a string, for example "10".')
 };
@@ -78,6 +86,15 @@ function parseSteamReleaseScoutPromptLimit(rawLimit: string | undefined): number
 }
 
 function parseSteamRecentlyPlayedPromptLimit(rawLimit: string | undefined): number | undefined {
+  const trimmed = rawLimit?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return z.coerce.number().int().min(1).max(100).parse(trimmed);
+}
+
+function parseSteamDiscoveryRouterPromptLimit(rawLimit: string | undefined): number | undefined {
   const trimmed = rawLimit?.trim();
   if (!trimmed) {
     return undefined;
@@ -283,6 +300,48 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               '4. Use steam_find_similar when you need to rank candidates by overlap with the user’s known favorites or recent play patterns; keep the default deterministic mode for backlog-first triage and use mode="official" only when store or both-scope ranking is explicitly needed and authenticated official prioritization is available.',
               '5. Use steam_export to produce a Markdown shortlist or JSON payload, and steam_link_generate to provide store/library/launch links for the finalists.',
               '6. Keep the reasoning explicit: Deck status, genres, tags, collections, favorites, hidden flags, playtime, and official store prioritization only when mode="official" was used.'
+            ].join('\n')
+          }
+        }]
+      };
+    }
+  );
+
+  registerPromptShallow(
+    server,
+    'steam_discovery_router',
+    {
+      title: 'Steam discovery router',
+      description: 'Guide an agent through choosing one primary discovery path and at most one adjacent fallback across the current validated Steam discovery surface.',
+      argsSchema: steamDiscoveryRouterPromptArgs
+    },
+    (rawArgs: unknown) => {
+      const parsedArgs = steamDiscoveryRouterPromptSchema.parse(rawArgs);
+      const limit = parseSteamDiscoveryRouterPromptLimit(parsedArgs.limit);
+      const preferredSource = parsedArgs.preferredSource;
+
+      return {
+        description: 'Workflow for routing broad Steam discovery requests to one primary path plus at most one adjacent fallback without widening the MCP surface.',
+        messages: [{
+          role: 'user',
+          content: {
+            type: 'text',
+            text: [
+              'Use the Steam MCP to route a broad discovery request safely across the current validated discovery surface.',
+              `Discovery request: ${parsedArgs.request}`,
+              limit === undefined ? 'Requested result limit: leave unset unless the user explicitly wants a shorter shortlist.' : `Requested result limit: ${limit}.`,
+              preferredSource ? `Preferred routing hint: ${preferredSource}.` : 'Preferred routing hint: auto-detect from the request.',
+              'Workflow:',
+              '1. Call steam_status first and confirm the selected Steam user, whether `STEAM_API_KEY` is available, and whether the request is library-centric, store-centric, release-centric, featured/editorial, similar-title, or recent-play driven.',
+              '2. Choose exactly one primary path before calling any discovery tool or prompt.',
+              '3. Use steam_library_curator when the ask is about owned-library analysis, recommendations, exports, or links. Do not confuse steam_library_curator with the removed steam_curator_discovery surface.',
+              '4. Use steam_deck_backlog_triage for Deck-friendly backlog prioritization, steam_recently_played for selected-user recent activity, steam_find_similar for “like this / more like this” intent, steam_release_scout for new/upcoming/release intent, steam_featured_scout for featured/editorial/promoted intent, steam_store_query for authenticated official catalog filtering, and steam_store_search for simpler unauthenticated public-store lookup.',
+              '5. You may use at most one adjacent fallback only if the primary path returns too few usable results or the chosen path cannot satisfy the request without changing semantics.',
+              '6. Keep fallbacks adjacent and explicit: release or featured discovery may fall back to steam_store_query for broader authenticated catalog lookup; steam_store_query may fall back to steam_store_search for simpler public-store lookup; recently played or library analysis may use steam_find_similar only as a follow-up comparison step.',
+              '7. If the primary path requires `STEAM_API_KEY` or selected-user resolution and steam_status shows that prerequisite is missing, stop and tell the user unless one adjacent public fallback still satisfies the same request honestly.',
+              '8. Do not route anything to steam_curator_discovery or any curator/list API surface. That surface was removed after upstream validation failed. steam_library_curator is still valid because it is the owned-library workflow, not storefront curator discovery.',
+              '9. Preserve provenance in the answer: say which primary path you chose, whether a fallback was used, and why.',
+              '10. Use steam_export for JSON/Markdown handoff and steam_link_generate for store, library, community, or launch links after the primary discovery step.'
             ].join('\n')
           }
         }]

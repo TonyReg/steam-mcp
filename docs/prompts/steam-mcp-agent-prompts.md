@@ -61,6 +61,29 @@ Recommended flow:
 
 This workflow also depends on API-authoritative owned-library enumeration. If `steam_status` reports missing `STEAM_API_KEY`, stop and ask for configuration before triaging the backlog.
 
+### `steam_discovery_router`
+
+Use this when an agent should route a broad discovery request to the right current Steam MCP surface without inventing a new endpoint or collapsing the discovery tools into one opaque path.
+
+Arguments:
+
+- `request` (required)
+- `limit` (optional string integer, for example `"10"`)
+- `preferredSource` (optional: `auto`, `library`, `store`, `featured`, `releases`, `similar`, `recent`)
+
+Recommended flow:
+
+1. `steam_status`
+2. Choose exactly one primary path before calling any discovery surface
+3. Use `steam_library_curator` for owned-library analysis, recommendations, exports, and links; this is not the removed `steam_curator_discovery` surface
+4. Use `steam_deck_backlog_triage` for Deck-friendly backlog asks, `steam_recently_played` for selected-user recent activity, `steam_find_similar` for “like this” / overlap intent, `steam_release_scout` for new or upcoming releases, `steam_featured_scout` for featured/editorial/promoted asks, `steam_store_query` for authenticated official catalog filtering, and `steam_store_search` for simpler public-store lookup
+5. Allow at most one adjacent fallback only if the primary path yields too few usable results or cannot satisfy the request honestly without changing semantics
+6. Keep fallbacks adjacent and explicit: release or featured discovery may fall back to `steam_store_query` for broader authenticated catalog lookup; `steam_store_query` may fall back to `steam_store_search` for simpler public-store lookup; recently played or library analysis may use `steam_find_similar` only as a follow-up comparison step
+7. Keep provenance explicit in the answer: name the chosen primary path, and if a fallback was needed, name that path and explain why
+8. `steam_export` and `steam_link_generate` for handoff and links after the main discovery step
+
+This workflow must not revive the removed curator/list surface. Do not route anything to `steam_curator_discovery` or any `IStoreCurationService`-backed path. If the selected primary path requires `STEAM_API_KEY` or selected-user resolution and `steam_status` reports that prerequisite missing, stop unless one adjacent public fallback still satisfies the same request honestly.
+
 ### `steam_recently_played`
 
 Use this when an agent should inspect recently played games for the selected Steam user through the official Steam Web API path.

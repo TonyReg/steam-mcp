@@ -158,3 +158,41 @@ test('steam featured scout prompt uses default bounded guidance when optional ar
   assert.match(text, /Requested language: default official client locale/);
   assert.match(text, /Requested country code: default official client locale/);
 });
+
+test('steam discovery router prompt renders single-primary routing with bounded fallback guidance', async () => {
+  const harness = createPromptHarness();
+
+  const result = await harness.invoke('steam_discovery_router', {
+    request: 'Find featured cozy puzzle games',
+    limit: '8',
+    preferredSource: 'featured'
+  });
+  const text = renderFirstPromptText(result);
+
+  assert.match(text, /Discovery request: Find featured cozy puzzle games/);
+  assert.match(text, /Requested result limit: 8/);
+  assert.match(text, /Preferred routing hint: featured/);
+  assert.match(text, /Choose exactly one primary path/);
+  assert.match(text, /at most one adjacent fallback/);
+  assert.match(text, /steam_featured_scout/);
+  assert.match(text, /steam_store_query/);
+  assert.match(text, /steam_store_search/);
+  assert.match(text, /steam_library_curator/);
+  assert.match(text, /steam_curator_discovery/);
+  assert.match(text, /STEAM_API_KEY/);
+});
+
+test('steam discovery router prompt uses auto-detect guidance when optional args are omitted', async () => {
+  const harness = createPromptHarness();
+
+  const result = await harness.invoke('steam_discovery_router', {
+    request: 'Help me browse something new'
+  });
+  const text = renderFirstPromptText(result);
+
+  assert.match(text, /Discovery request: Help me browse something new/);
+  assert.match(text, /Requested result limit: leave unset unless the user explicitly wants a shorter shortlist/);
+  assert.match(text, /Preferred routing hint: auto-detect from the request/);
+  assert.match(text, /selected-user recent activity/);
+  assert.match(text, /steam_find_similar/);
+});

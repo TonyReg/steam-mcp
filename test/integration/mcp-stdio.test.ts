@@ -141,6 +141,7 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.deepEqual(promptNames, [
       'steam_collection_planner',
       'steam_deck_backlog_triage',
+      'steam_discovery_router',
       'steam_featured_scout',
       'steam_library_curator',
       'steam_recently_played',
@@ -159,6 +160,22 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.match(JSON.stringify(collectionPlannerPrompt), /Group co-op hidden backlog/);
     assert.match(JSON.stringify(collectionPlannerPrompt), /STEAM_ENABLE_WINDOWS_ORCHESTRATION=1/);
     assert.match(JSON.stringify(collectionPlannerPrompt), /does not mean Steam cloud sync has completed/);
+
+    const discoveryRouterPrompt = await client.getPrompt({
+      name: 'steam_discovery_router',
+      arguments: {
+        request: 'Find featured cozy puzzle games',
+        limit: '8',
+        preferredSource: 'featured'
+      }
+    });
+    assert.match(JSON.stringify(discoveryRouterPrompt), /Choose exactly one primary path/);
+    assert.match(JSON.stringify(discoveryRouterPrompt), /at most one adjacent fallback/);
+    assert.match(JSON.stringify(discoveryRouterPrompt), /steam_featured_scout/);
+    assert.match(JSON.stringify(discoveryRouterPrompt), /steam_store_query/);
+    assert.match(JSON.stringify(discoveryRouterPrompt), /steam_library_curator/);
+    assert.match(JSON.stringify(discoveryRouterPrompt), /steam_curator_discovery/);
+    assert.match(JSON.stringify(discoveryRouterPrompt), /STEAM_API_KEY/);
 
     const recentlyPlayedPrompt = await client.getPrompt({
       name: 'steam_recently_played',
