@@ -12,6 +12,8 @@ skills/
     SKILL.md
   steam-deck-backlog-triage/
     SKILL.md
+  steam-discovery-router/
+    SKILL.md
   steam-recently-played/
     SKILL.md
   steam-featured-scout/
@@ -36,6 +38,10 @@ skills/
 - **`steam-deck-backlog-triage`**
   - Steam Deck backlog filtering and deterministic shortlist generation from the owned library
 
+- **`steam-discovery-router`**
+  - prompt-first guidance for broad Steam discovery asks that need one primary path plus at most one adjacent fallback
+  - keeps provenance explicit while routing only across the current validated discovery surface
+
 - **`steam-recently-played`**
   - read-only inspection of recently played games for the selected Steam user through the official Steam Web API path
   - deterministic follow-up comparison, export, and link workflows after the recent-play pass
@@ -57,6 +63,7 @@ These skills are designed to sit on top of the MCP prompts already implemented i
 - `steam_library_curator`
 - `steam_collection_planner`
 - `steam_deck_backlog_triage`
+- `steam_discovery_router`
 - `steam_recently_played`
 - `steam_featured_scout`
 - `steam_store_query`
