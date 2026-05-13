@@ -178,7 +178,7 @@ test('steam discovery router prompt renders single-primary routing with bounded 
   assert.match(text, /steam_store_query/);
   assert.match(text, /steam_store_search/);
   assert.match(text, /steam_library_curator/);
-  assert.match(text, /steam_curator_discovery/);
+  assert.match(text, /removed storefront curator\/list discovery surface/);
   assert.match(text, /STEAM_API_KEY/);
 });
 

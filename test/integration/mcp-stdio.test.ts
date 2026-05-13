@@ -174,7 +174,7 @@ test('stdio server registers exact tools and answers basic calls', async () => {
     assert.match(JSON.stringify(discoveryRouterPrompt), /steam_featured_scout/);
     assert.match(JSON.stringify(discoveryRouterPrompt), /steam_store_query/);
     assert.match(JSON.stringify(discoveryRouterPrompt), /steam_library_curator/);
-    assert.match(JSON.stringify(discoveryRouterPrompt), /steam_curator_discovery/);
+    assert.match(JSON.stringify(discoveryRouterPrompt), /removed storefront curator\/list discovery surface/);
     assert.match(JSON.stringify(discoveryRouterPrompt), /STEAM_API_KEY/);
 
     const recentlyPlayedPrompt = await client.getPrompt({
