@@ -14,7 +14,11 @@ import { registerSteamStatusTool } from './tools/steam-status.js';
 import { registerSteamReleaseScoutTool } from './tools/steam-release-scout.js';
 import { registerSteamRecentlyPlayedTool } from './tools/steam-recently-played.js';
 import { registerSteamWishlistTool } from './tools/steam-wishlist.js';
+import { registerSteamWishlistDeckShortlistTool } from './tools/steam-wishlist-deck-shortlist.js';
+import { registerSteamWishlistDetailsTool } from './tools/steam-wishlist-details.js';
+import { registerSteamWishlistDiscountSummaryTool } from './tools/steam-wishlist-discount-summary.js';
 import { registerSteamWishlistOnSaleTool } from './tools/steam-wishlist-on-sale.js';
+import { registerSteamWishlistSearchTool } from './tools/steam-wishlist-search.js';
 import { registerSteamStoreQueryTool } from './tools/steam-store-query.js';
 import { registerSteamStoreSearchTool } from './tools/steam-store-search.js';
 
@@ -34,6 +38,10 @@ export function createServer(env: NodeJS.ProcessEnv = process.env, context: Stea
   registerSteamRecentlyPlayedTool(server, context);
   registerSteamWishlistTool(server, context);
   registerSteamWishlistOnSaleTool(server, context);
+  registerSteamWishlistDetailsTool(server, context);
+  registerSteamWishlistSearchTool(server, context);
+  registerSteamWishlistDeckShortlistTool(server, context);
+  registerSteamWishlistDiscountSummaryTool(server, context);
   registerSteamFindSimilarTool(server, context);
   registerSteamCollectionPlanTool(server, context);
   registerSteamCollectionApplyTool(server, context);

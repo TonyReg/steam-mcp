@@ -147,7 +147,11 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       'steam_store_query',
       'steam_store_search',
       'steam_wishlist',
-      'steam_wishlist_on_sale'
+      'steam_wishlist_deck_shortlist',
+      'steam_wishlist_details',
+      'steam_wishlist_discount_summary',
+      'steam_wishlist_on_sale',
+      'steam_wishlist_search'
     ]);
     const collectionApplyTool = tools.tools.find((tool) => tool.name === 'steam_collection_apply');
     assert.ok(collectionApplyTool);
@@ -739,6 +743,37 @@ test('stdio server returns wishlist sale results with unknown price accounting t
         }
       ]
     });
+
+    const discountResult = await client.callTool({
+      name: 'steam_wishlist_discount_summary',
+      arguments: {
+        limit: 1,
+        minimumDiscountPercent: 50
+      }
+    });
+    const discountPayload = parseFirstTextContent(discountResult) as {
+      totalCount: number;
+      pricedCount: number;
+      discountedCount: number;
+      unknownPriceCount: number;
+      items: Array<{ appId: number; savingsInCents: number }>;
+      currencies: Array<{ currency?: string; discountedCount: number; totalSavingsInCents: number }>;
+      metadata: { priceSource: string; countsIgnoreLimit: boolean };
+    };
+
+    assert.equal(discountPayload.totalCount, 2);
+    assert.equal(discountPayload.pricedCount, 1);
+    assert.equal(discountPayload.discountedCount, 1);
+    assert.equal(discountPayload.unknownPriceCount, 1);
+    assert.deepEqual(discountPayload.items.map((item) => ({ appId: item.appId, savingsInCents: item.savingsInCents })), [
+      { appId: 620, savingsInCents: 1500 }
+    ]);
+    assert.deepEqual(discountPayload.currencies.map((currency) => ({
+      currency: currency.currency,
+      discountedCount: currency.discountedCount,
+      totalSavingsInCents: currency.totalSavingsInCents
+    })), [{ currency: 'USD', discountedCount: 1, totalSavingsInCents: 1500 }]);
+    assert.deepEqual(discountPayload.metadata, { priceSource: 'live-public-appdetails', countsIgnoreLimit: true });
   } finally {
     await client.close();
   }
