@@ -414,6 +414,39 @@ export interface OfficialRecentlyPlayedGamesResult {
   games: OfficialRecentlyPlayedGameSummary[];
 }
 
+export interface OfficialWishlistOptions {
+  steamId: string;
+}
+
+export interface OfficialWishlistItemCountResult {
+  count: number;
+}
+
+export interface OfficialWishlistItemSummary {
+  appId: number;
+  priority?: number;
+  dateAdded?: number;
+}
+
+export interface OfficialWishlistResult {
+  items: OfficialWishlistItemSummary[];
+}
+
+export interface WishlistListOptions {
+  steamId: string;
+}
+
+export interface WishlistListResult {
+  totalCount: number;
+  items: OfficialWishlistItemSummary[];
+}
+
+export interface WishlistAnnotation {
+  listed: true;
+  priority?: number;
+  dateAdded?: number;
+}
+
 export interface SteamReleaseScoutResult {
   appId: number;
   name: string;
@@ -425,6 +458,7 @@ export interface SteamReleaseScoutResult {
   ordering: 'query' | 'charts';
   filtersApplied: string[];
   storeUrl: string;
+  wishlist?: WishlistAnnotation;
 }
 
 export interface SteamFeaturedScoutResult {
@@ -440,5 +474,6 @@ export interface SteamFeaturedScoutResult {
   marketingBucket: OfficialStoreItemsToFeatureFamily;
   filtersApplied: string[];
   storeUrl: string;
+  wishlist?: WishlistAnnotation;
 }
 
