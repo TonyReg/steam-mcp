@@ -8,6 +8,8 @@ Each skill lives in its own folder and uses the standard `SKILL.md` layout:
 skills/
   steam-library-curator/
     SKILL.md
+  steam-wishlist-curator/
+    SKILL.md
   steam-collection-planner/
     SKILL.md
   steam-deck-backlog-triage/
@@ -30,6 +32,10 @@ skills/
   - library-first analysis of the owned Steam library
   - deterministic recommendations from owned games, with optional store enrichment/comparison when useful
   - export and `steam://` link workflows
+
+- **`steam-wishlist-curator`**
+  - read-only selected-user wishlist curation using official wishlist membership data plus public appdetails enrichment
+  - wishlist search, sale/discount discovery, Deck shortlisting, export, and link workflows
 
 - **`steam-collection-planner`**
   - plan-first collection and hidden-state workflows with read-only or ignored collection protection
@@ -61,6 +67,7 @@ skills/
 These skills are designed to sit on top of the MCP prompts already implemented in this repo:
 
 - `steam_library_curator`
+- `steam_wishlist_curator`
 - `steam_collection_planner`
 - `steam_deck_backlog_triage`
 - `steam_discovery_router`
