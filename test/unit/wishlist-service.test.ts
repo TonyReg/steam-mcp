@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { OfficialStoreClient } from '../../packages/steam-core/src/official-store/index.js';
 import type { StoreAppDetails } from '../../packages/steam-core/src/types.js';
-import { createWishlistAnnotationMap, WishlistSaleService, WishlistService } from '../../packages/steam-core/src/wishlist/index.js';
+import { createWishlistAnnotationMap, WishlistEnrichmentService, WishlistSaleService, WishlistService } from '../../packages/steam-core/src/wishlist/index.js';
 
 test('wishlist service combines official count and wishlist item reads', async () => {
   const calls: unknown[] = [];
@@ -134,6 +134,135 @@ test('wishlist sale service propagates wishlist lookup failures', async () => {
   });
 
   await assert.rejects(service.listOnSale({ steamId: '76561198000000000' }), expectedError);
+});
+
+test('wishlist enrichment lists cacheable details, preserves metadata, and counts missing details', async () => {
+  const calls = {
+    cacheable: [] as number[],
+    fresh: [] as number[],
+    deck: [] as number[]
+  };
+  const service = new WishlistEnrichmentService({
+    list: async () => ({
+      totalCount: 3,
+      items: [
+        { appId: 10, priority: 1, dateAdded: 1710000000 },
+        { appId: 20, priority: 2 },
+        { appId: 30 }
+      ]
+    })
+  }, {
+    getCacheableAppDetails: async (appId: number) => {
+      calls.cacheable.push(appId);
+      return appId === 20 ? undefined : createStoreDetails(appId, `App ${appId}`);
+    },
+    getFreshAppDetails: async (appId: number) => {
+      calls.fresh.push(appId);
+      return createStoreDetails(appId, `Fresh ${appId}`);
+    }
+  }, {
+    getStatus: async (appId: number) => {
+      calls.deck.push(appId);
+      return appId === 10 ? 'verified' : 'unknown';
+    }
+  });
+
+  const result = await service.listDetails({ steamId: '76561198000000000', includeDeckStatus: true });
+
+  assert.equal(result.totalCount, 3);
+  assert.equal(result.missingDetailsCount, 1);
+  assert.deepEqual(result.items.map((item) => ({
+    appId: item.appId,
+    priority: item.priority,
+    dateAdded: item.dateAdded,
+    name: item.details?.name,
+    deckStatus: item.deckStatus
+  })), [
+    { appId: 10, priority: 1, dateAdded: 1710000000, name: 'App 10', deckStatus: 'verified' },
+    { appId: 20, priority: 2, dateAdded: undefined, name: undefined, deckStatus: 'unknown' },
+    { appId: 30, priority: undefined, dateAdded: undefined, name: 'App 30', deckStatus: 'unknown' }
+  ]);
+  assert.deepEqual(calls.cacheable, [10, 20, 30]);
+  assert.deepEqual(calls.fresh, []);
+  assert.deepEqual(calls.deck, [10, 20, 30]);
+});
+
+test('wishlist enrichment uses fresh details when requested and skips Deck status by default', async () => {
+  const calls = {
+    cacheable: [] as number[],
+    fresh: [] as number[],
+    deck: [] as number[]
+  };
+  const service = new WishlistEnrichmentService({
+    list: async () => ({ totalCount: 2, items: [{ appId: 10 }, { appId: 20 }] })
+  }, {
+    getCacheableAppDetails: async (appId: number) => {
+      calls.cacheable.push(appId);
+      return createStoreDetails(appId, `Cached ${appId}`);
+    },
+    getFreshAppDetails: async (appId: number) => {
+      calls.fresh.push(appId);
+      return createStoreDetails(appId, `Fresh ${appId}`);
+    }
+  }, {
+    getStatus: async (appId: number) => {
+      calls.deck.push(appId);
+      return 'verified';
+    }
+  });
+
+  const result = await service.listDetails({ steamId: '76561198000000000', limit: 1, priceFreshness: 'fresh' });
+
+  assert.deepEqual(result.items.map((item) => item.details?.name), ['Fresh 10']);
+  assert.deepEqual(calls.cacheable, []);
+  assert.deepEqual(calls.fresh, [10]);
+  assert.deepEqual(calls.deck, []);
+});
+
+test('wishlist enrichment summarizes fresh discounts across all items independent of limit', async () => {
+  const calls: number[] = [];
+  const service = new WishlistEnrichmentService({
+    list: async () => ({
+      totalCount: 5,
+      items: [
+        { appId: 10, priority: 1 },
+        { appId: 20 },
+        { appId: 30 },
+        { appId: 40 },
+        { appId: 50 }
+      ]
+    })
+  }, {
+    getCacheableAppDetails: async () => undefined,
+    getFreshAppDetails: async (appId: number) => {
+      calls.push(appId);
+      const detailsByAppId = new Map<number, StoreAppDetails | undefined>([
+        [10, createStoreDetails(10, 'Ten', { currency: 'USD', initialInCents: 2000, finalInCents: 500, discountPercent: 75 })],
+        [20, createStoreDetails(20, 'Twenty', { currency: 'USD', initialInCents: 1000, finalInCents: 800, discountPercent: 20 })],
+        [30, createStoreDetails(30, 'Thirty', { currency: 'EUR', initialInCents: 3000, finalInCents: 1500, discountPercent: 50 })],
+        [40, createStoreDetails(40, 'Forty')]
+      ]);
+      return detailsByAppId.get(appId);
+    }
+  }, {
+    getStatus: async () => 'unknown'
+  });
+
+  const result = await service.summarizeDiscounts({ steamId: '76561198000000000', minimumDiscountPercent: 25, limit: 1 });
+
+  assert.equal(result.totalCount, 5);
+  assert.equal(result.pricedCount, 3);
+  assert.equal(result.discountedCount, 2);
+  assert.equal(result.unknownPriceCount, 2);
+  assert.deepEqual(result.items.map((item) => ({ appId: item.appId, savingsInCents: item.savingsInCents })), [
+    { appId: 10, savingsInCents: 1500 }
+  ]);
+  assert.deepEqual(result.currencies, [
+    { currency: 'USD', discountedCount: 1, totalInitialInCents: 2000, totalFinalInCents: 500, totalSavingsInCents: 1500 },
+    { currency: 'EUR', discountedCount: 1, totalInitialInCents: 3000, totalFinalInCents: 1500, totalSavingsInCents: 1500 }
+  ]);
+  assert.deepEqual(result.metadata, { priceSource: 'live-public-appdetails', countsIgnoreLimit: true });
+  assert.deepEqual(calls, [10, 20, 30, 40, 50]);
 });
 
 function createStoreDetails(
