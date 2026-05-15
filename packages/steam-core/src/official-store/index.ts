@@ -5,6 +5,10 @@ import type {
   OfficialRecentlyPlayedGameSummary,
   OfficialRecentlyPlayedGamesOptions,
   OfficialRecentlyPlayedGamesResult,
+  OfficialWishlistItemCountResult,
+  OfficialWishlistItemSummary,
+  OfficialWishlistOptions,
+  OfficialWishlistResult,
   OfficialStoreAppListOptions,
   OfficialStoreAppListResult,
   OfficialStoreAppSummary,
@@ -207,6 +211,30 @@ export class OfficialStoreClient {
     return normalizeOfficialRecentlyPlayedGames(response);
   }
 
+  async getWishlistItemCount(request: OfficialWishlistOptions): Promise<OfficialWishlistItemCountResult> {
+    const response = await this.fetchServiceInterfaceJson(
+      'https://api.steampowered.com/IWishlistService/GetWishlistItemCount/v1/',
+      {
+        steamid: request.steamId
+      },
+      'Steam Web API key is required for official wishlist access. Set STEAM_API_KEY.',
+      'Official wishlist request failed'
+    );
+    return normalizeOfficialWishlistItemCount(response);
+  }
+
+  async getWishlist(request: OfficialWishlistOptions): Promise<OfficialWishlistResult> {
+    const response = await this.fetchServiceInterfaceJson(
+      'https://api.steampowered.com/IWishlistService/GetWishlist/v1/',
+      {
+        steamid: request.steamId
+      },
+      'Steam Web API key is required for official wishlist access. Set STEAM_API_KEY.',
+      'Official wishlist request failed'
+    );
+    return normalizeOfficialWishlist(response);
+  }
+
   private async fetchServiceInterfaceJson(
     endpoint: string,
     requestPayload: Record<string, unknown>,
@@ -331,6 +359,26 @@ function normalizeOfficialRecentlyPlayedGames(payload: unknown): OfficialRecentl
     totalCount: toNumber(response.total_count) ?? games.length,
     games
   };
+}
+
+function normalizeOfficialWishlistItemCount(payload: unknown): OfficialWishlistItemCountResult {
+  if (!isRecord(payload) || !isRecord(payload.response)) {
+    return { count: 0 };
+  }
+
+  return { count: toNumber(payload.response.count) ?? 0 };
+}
+
+function normalizeOfficialWishlist(payload: unknown): OfficialWishlistResult {
+  if (!isRecord(payload) || !isRecord(payload.response)) {
+    return { items: [] };
+  }
+
+  const items = Array.isArray(payload.response.items)
+    ? payload.response.items.flatMap((entry) => normalizeOfficialWishlistItem(entry))
+    : [];
+
+  return { items };
 }
 
 function normalizeOfficialTopReleasesPage(payload: unknown): OfficialStoreTopReleasesPage[] {
@@ -676,14 +724,28 @@ function normalizeOfficialRecentlyPlayedGame(payload: unknown): OfficialRecently
     return [];
   }
 
-  const name = typeof payload.name === 'string' && payload.name.trim() !== '' ? payload.name : undefined;
-  const iconUrl = typeof payload.img_icon_url === 'string' && payload.img_icon_url.trim() !== '' ? payload.img_icon_url : undefined;
+  return [{
+    appId,
+    name: readOfficialStoreTrimmedString(payload.name),
+    playtimeTwoWeeks: toNumber(payload.playtime_2weeks),
+    playtimeForever: toNumber(payload.playtime_forever),
+    iconUrl: readOfficialStoreTrimmedString(payload.img_icon_url)
+  } satisfies OfficialRecentlyPlayedGameSummary];
+}
+
+function normalizeOfficialWishlistItem(payload: unknown): OfficialWishlistItemSummary[] {
+  if (!isRecord(payload)) {
+    return [];
+  }
+
+  const appId = toNumber(payload.appid);
+  if (!appId) {
+    return [];
+  }
 
   return [{
     appId,
-    name,
-    playtimeTwoWeeks: toNumber(payload.playtime_2weeks),
-    playtimeForever: toNumber(payload.playtime_forever),
-    iconUrl
-  } satisfies OfficialRecentlyPlayedGameSummary];
+    priority: toNumber(payload.priority),
+    dateAdded: toNumber(payload.date_added)
+  } satisfies OfficialWishlistItemSummary];
 }

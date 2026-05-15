@@ -816,6 +816,120 @@ test('official store client calls GetRecentlyPlayedGames with input_json-only st
   });
 });
 
+test('official store client calls GetWishlistItemCount with input_json-only steamid and normalizes count', async () => {
+  const requestedUrls: string[] = [];
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      requestedUrls.push(url.toString());
+      return new Response(JSON.stringify({
+        response: {
+          count: 3
+        }
+      }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }
+  });
+
+  const result = await client.getWishlistItemCount({
+    steamId: '76561198000000000'
+  });
+
+  assert.deepEqual(result, {
+    count: 3
+  });
+
+  const requestUrl = new URL(requestedUrls[0] ?? '');
+  assert.equal(requestUrl.toString().startsWith('https://api.steampowered.com/IWishlistService/GetWishlistItemCount/v1/'), true);
+  assert.equal(requestUrl.searchParams.get('key'), 'test-key');
+  assert.equal(requestUrl.searchParams.get('format'), 'json');
+  assert.equal(requestUrl.searchParams.get('steamid'), null);
+
+  const inputJson = JSON.parse(requestUrl.searchParams.get('input_json') ?? '{}') as Record<string, unknown>;
+  assert.deepEqual(inputJson, {
+    steamid: '76561198000000000'
+  });
+});
+
+test('official store client calls GetWishlist with input_json-only steamid and normalizes wishlist items', async () => {
+  const requestedUrls: string[] = [];
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      requestedUrls.push(url.toString());
+      return new Response(JSON.stringify({
+        response: {
+          items: [
+            { appid: 620, priority: 1, date_added: 1714000000 },
+            { appid: 0, priority: 2, date_added: 1715000000 },
+            { appid: 730 }
+          ]
+        }
+      }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }
+  });
+
+  const result = await client.getWishlist({
+    steamId: '76561198000000000'
+  });
+
+  assert.deepEqual(result, {
+    items: [
+      {
+        appId: 620,
+        priority: 1,
+        dateAdded: 1714000000
+      },
+      {
+        appId: 730,
+        priority: undefined,
+        dateAdded: undefined
+      }
+    ]
+  });
+
+  const requestUrl = new URL(requestedUrls[0] ?? '');
+  assert.equal(requestUrl.toString().startsWith('https://api.steampowered.com/IWishlistService/GetWishlist/v1/'), true);
+  assert.equal(requestUrl.searchParams.get('key'), 'test-key');
+  assert.equal(requestUrl.searchParams.get('format'), 'json');
+  assert.equal(requestUrl.searchParams.get('steamid'), null);
+
+  const inputJson = JSON.parse(requestUrl.searchParams.get('input_json') ?? '{}') as Record<string, unknown>;
+  assert.deepEqual(inputJson, {
+    steamid: '76561198000000000'
+  });
+});
+
+test('official store client rejects wishlist calls when no API key is configured', async () => {
+  const client = new OfficialStoreClient({
+    fetchImpl: async () => {
+      throw new Error('fetch should not run');
+    }
+  });
+
+  await assert.rejects(() => client.getWishlistItemCount({
+    steamId: '76561198000000000'
+  }), /Steam Web API key is required for official wishlist access\. Set STEAM_API_KEY\./);
+  await assert.rejects(() => client.getWishlist({
+    steamId: '76561198000000000'
+  }), /Steam Web API key is required for official wishlist access\. Set STEAM_API_KEY\./);
+});
+
+test('official store client surfaces non-ok HTTP failures for wishlist requests', async () => {
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async () => new Response('upstream failure', { status: 504 })
+  });
+
+  await assert.rejects(() => client.getWishlistItemCount({
+    steamId: '76561198000000000'
+  }), /Official wishlist request failed with status 504\./);
+  await assert.rejects(() => client.getWishlist({
+    steamId: '76561198000000000'
+  }), /Official wishlist request failed with status 504\./);
+});
+
 test('official store client rejects recently-played calls when no API key is configured', async () => {
   const client = new OfficialStoreClient({
     fetchImpl: async () => {
