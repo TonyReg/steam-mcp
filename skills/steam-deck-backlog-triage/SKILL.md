@@ -44,3 +44,4 @@ steam_link_generate
 - Use `verified` as the default Deck filter unless the user asks for broader `playable` results.
 - If the user also wants category changes for the shortlist, switch to the `steam-collection-planner` skill after triage.
 - If the user wants to browse the wider Steam store rather than triage the owned backlog, switch to the `steam-library-curator` workflow instead.
+- If the user wants a Deck-friendly shortlist from wishlist items rather than the owned backlog, switch to `steam-wishlist-curator` instead of routing the ask through backlog triage.

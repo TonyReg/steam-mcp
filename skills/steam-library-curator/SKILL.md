@@ -42,3 +42,5 @@ steam_link_generate
 ## Escalation
 
 If the user wants to reorganize named collections or hidden flags, stop this workflow and switch to the `steam-collection-planner` skill.
+
+If the user primarily wants to curate, search, or shortlist unowned wishlist items, switch to `steam-wishlist-curator` instead of stretching this library-first workflow.
