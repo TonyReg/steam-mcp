@@ -55,7 +55,110 @@ test('store client normalizes sparse appdetails payloads', async () => {
   assert.equal(details.type, undefined);
   assert.equal(details.releaseDate, undefined);
   assert.equal(details.comingSoon, undefined);
+  assert.equal(details.priceOverview, undefined);
   assert.equal(details.storeUrl, 'https://store.steampowered.com/app/620/');
+});
+
+test('store client normalizes discounted appdetails price overview', async () => {
+  const storeClient = new StoreClient(async () => new Response(JSON.stringify({
+    '620': {
+      success: true,
+      data: {
+        steam_appid: 620,
+        name: 'Portal 2',
+        price_overview: {
+          currency: 'USD',
+          initial: 1999,
+          final: 499,
+          discount_percent: 75,
+          initial_formatted: '$19.99',
+          final_formatted: '$4.99'
+        }
+      }
+    }
+  }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response);
+
+  const details = await storeClient.getAppDetails(620);
+
+  assert.ok(details);
+  assert.deepEqual(details.priceOverview, {
+    currency: 'USD',
+    initialInCents: 1999,
+    finalInCents: 499,
+    discountPercent: 75,
+    initialFormatted: '$19.99',
+    finalFormatted: '$4.99'
+  });
+});
+
+test('store client ignores incomplete appdetails price overview', async () => {
+  const storeClient = new StoreClient(async () => new Response(JSON.stringify({
+    '620': {
+      success: true,
+      data: {
+        steam_appid: 620,
+        name: 'Portal 2',
+        price_overview: {
+          currency: 'USD',
+          initial: 1999,
+          discount_percent: 75
+        }
+      }
+    }
+  }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response);
+
+  const details = await storeClient.getAppDetails(620);
+
+  assert.ok(details);
+  assert.equal(details.priceOverview, undefined);
+});
+
+test('store client persists and rehydrates appdetails price overview', async () => {
+  const cacheDir = await mkdtemp(path.join(tmpdir(), 'steam-mcp-store-cache-price-'));
+  const payload = JSON.stringify({
+    '620': {
+      success: true,
+      data: {
+        steam_appid: 620,
+        name: 'Portal 2',
+        price_overview: {
+          currency: 'USD',
+          initial: 1999,
+          final: 499,
+          discount_percent: 75,
+          initial_formatted: '$19.99',
+          final_formatted: '$4.99'
+        }
+      }
+    }
+  });
+  let requestCount = 0;
+
+  const firstClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-01T00:00:00.000Z') });
+
+  const first = await firstClient.getCacheableAppDetails(620);
+  assert.ok(first);
+  assert.deepEqual(first.priceOverview, {
+    currency: 'USD',
+    initialInCents: 1999,
+    finalInCents: 499,
+    discountPercent: 75,
+    initialFormatted: '$19.99',
+    finalFormatted: '$4.99'
+  });
+
+  const secondClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-02T00:00:00.000Z') });
+
+  const second = await secondClient.getCacheableAppDetails(620);
+  assert.ok(second);
+  assert.deepEqual(second.priceOverview, first.priceOverview);
+  assert.equal(requestCount, 1);
 });
 
 test('store client persists appdetails cache to disk and reuses it across instances', async () => {
@@ -278,6 +381,105 @@ test('store client does not persist failed or unusable appdetails responses', as
   assert.ok(fourth);
   assert.equal(fourth.name, 'Portal 2');
   assert.equal(requestCount, 3);
+});
+
+test('store client getFreshAppDetails bypasses unexpired cached price data', async () => {
+  const cacheDir = await mkdtemp(path.join(tmpdir(), 'steam-mcp-store-cache-fresh-price-'));
+  const cachedPayload = JSON.stringify({
+    '620': {
+      success: true,
+      data: {
+        steam_appid: 620,
+        name: 'Portal 2',
+        price_overview: {
+          currency: 'USD',
+          initial: 1999,
+          final: 499,
+          discount_percent: 75,
+          initial_formatted: '$19.99',
+          final_formatted: '$4.99'
+        }
+      }
+    }
+  });
+  const refreshedPayload = JSON.stringify({
+    '620': {
+      success: true,
+      data: {
+        steam_appid: 620,
+        name: 'Portal 2',
+        price_overview: {
+          currency: 'USD',
+          initial: 1999,
+          final: 999,
+          discount_percent: 50,
+          initial_formatted: '$19.99',
+          final_formatted: '$9.99'
+        }
+      }
+    }
+  });
+  let requestCount = 0;
+
+  const seedClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response(cachedPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-01T00:00:00.000Z') });
+  await seedClient.getCacheableAppDetails(620);
+
+  const freshClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response(refreshedPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-02T00:00:00.000Z') });
+  const fresh = await freshClient.getFreshAppDetails(620);
+
+  assert.ok(fresh);
+  assert.deepEqual(fresh.priceOverview, {
+    currency: 'USD',
+    initialInCents: 1999,
+    finalInCents: 999,
+    discountPercent: 50,
+    initialFormatted: '$19.99',
+    finalFormatted: '$9.99'
+  });
+  assert.equal(requestCount, 2);
+});
+
+test('store client getFreshAppDetails does not fall back to cached price data on refresh failure', async () => {
+  const cacheDir = await mkdtemp(path.join(tmpdir(), 'steam-mcp-store-cache-fresh-failure-'));
+  const cachedPayload = JSON.stringify({
+    '620': {
+      success: true,
+      data: {
+        steam_appid: 620,
+        name: 'Portal 2',
+        price_overview: {
+          currency: 'USD',
+          initial: 1999,
+          final: 499,
+          discount_percent: 75,
+          initial_formatted: '$19.99',
+          final_formatted: '$4.99'
+        }
+      }
+    }
+  });
+  let requestCount = 0;
+
+  const seedClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response(cachedPayload, { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-01T00:00:00.000Z') });
+  await seedClient.getCacheableAppDetails(620);
+
+  const freshClient = new StoreClient(async () => {
+    requestCount += 1;
+    return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }) as Response;
+  }, undefined, { cacheDir, now: () => new Date('2026-01-02T00:00:00.000Z') });
+  const fresh = await freshClient.getFreshAppDetails(620);
+
+  assert.equal(fresh, undefined);
+  assert.equal(requestCount, 2);
 });
 
 test('deck status provider uses the live nAppID request contract', async () => {

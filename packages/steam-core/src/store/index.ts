@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DeckStatusProvider } from '../deck/index.js';
-import type { StoreAppDetails, StoreSearchCandidate, StoreSearchOptions } from '../types.js';
+import type { StoreAppDetails, StorePriceOverview, StoreSearchCandidate, StoreSearchOptions } from '../types.js';
 import { isRecord, uniqueStrings } from '../utils.js';
 
 interface CachedAppDetails {
@@ -114,6 +114,20 @@ export class StoreClient {
     }
 
     return undefined;
+  }
+
+  async getFreshAppDetails(appId: number): Promise<StoreAppDetails | undefined> {
+    const refreshed = await this.fetchAppDetails(appId);
+    if (!refreshed) {
+      return undefined;
+    }
+
+    if (isCacheableAppDetails(refreshed.details)) {
+      this.detailCache.set(appId, refreshed);
+      await this.persistCacheEntry(appId, refreshed);
+    }
+
+    return refreshed.details;
   }
 
   private async getCachedDetails(appId: number): Promise<CachedAppDetails | undefined> {
@@ -249,12 +263,14 @@ function normalizeAppDetails(appId: number, payload: unknown): StoreAppDetails |
     return undefined;
   }
 
+  const releaseDate = readReleaseDate(data.release_date);
+
   return {
     appId,
     name,
     type: readStoreAppType(data.type),
-    releaseDate: readReleaseDate(data.release_date)?.date,
-    comingSoon: readReleaseDate(data.release_date)?.comingSoon,
+    releaseDate: releaseDate?.date,
+    comingSoon: releaseDate?.comingSoon,
     developers: uniqueStrings(readObjectNameArray(data.developers)),
     publishers: uniqueStrings(readObjectNameArray(data.publishers)),
     genres: uniqueStrings(readObjectNameArray(data.genres)),
@@ -262,7 +278,8 @@ function normalizeAppDetails(appId: number, payload: unknown): StoreAppDetails |
     tags: uniqueStrings(readObjectNameArray(data.tags)),
     shortDescription: typeof data.short_description === 'string' ? data.short_description : undefined,
     headerImage: typeof data.header_image === 'string' ? data.header_image : undefined,
-    storeUrl: `https://store.steampowered.com/app/${appId}/`
+    storeUrl: `https://store.steampowered.com/app/${appId}/`,
+    priceOverview: readPriceOverview(data.price_overview)
   };
 }
 
@@ -311,7 +328,8 @@ function readPersistedAppDetails(value: unknown, appId: number): StoreAppDetails
     tags: readStringArray(value.tags),
     shortDescription: typeof value.shortDescription === 'string' ? value.shortDescription : undefined,
     headerImage: typeof value.headerImage === 'string' ? value.headerImage : undefined,
-    storeUrl: typeof value.storeUrl === 'string' ? value.storeUrl : `https://store.steampowered.com/app/${appId}/`
+    storeUrl: typeof value.storeUrl === 'string' ? value.storeUrl : `https://store.steampowered.com/app/${appId}/`,
+    priceOverview: readPriceOverview(value.priceOverview)
   };
 
   return isCacheableAppDetails(details) ? details : undefined;
@@ -331,7 +349,8 @@ function isCacheableAppDetails(details: StoreAppDetails): boolean {
     || details.comingSoon !== undefined
     || details.type !== undefined
     || hasNonBlankValue(details.shortDescription)
-    || hasNonBlankValue(details.headerImage);
+    || hasNonBlankValue(details.headerImage)
+    || details.priceOverview !== undefined;
 }
 
 function readStoreAppType(value: unknown): StoreAppDetails['type'] {
@@ -352,6 +371,42 @@ function readReleaseDate(value: unknown): { date?: string; comingSoon?: boolean 
   }
 
   return { date, comingSoon };
+}
+
+function readPriceOverview(value: unknown): StorePriceOverview | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const initialInCents = typeof value.initial === 'number'
+    ? value.initial
+    : typeof value.initialInCents === 'number'
+      ? value.initialInCents
+      : undefined;
+  const finalInCents = typeof value.final === 'number'
+    ? value.final
+    : typeof value.finalInCents === 'number'
+      ? value.finalInCents
+      : undefined;
+  const discountPercent = typeof value.discount_percent === 'number'
+    ? value.discount_percent
+    : typeof value.discountPercent === 'number'
+      ? value.discountPercent
+      : undefined;
+  if (initialInCents === undefined || finalInCents === undefined || discountPercent === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(typeof value.currency === 'string' ? { currency: value.currency } : {}),
+    initialInCents,
+    finalInCents,
+    discountPercent,
+    ...(typeof value.initial_formatted === 'string' ? { initialFormatted: value.initial_formatted } : {}),
+    ...(typeof value.initialFormatted === 'string' ? { initialFormatted: value.initialFormatted } : {}),
+    ...(typeof value.final_formatted === 'string' ? { finalFormatted: value.final_formatted } : {}),
+    ...(typeof value.finalFormatted === 'string' ? { finalFormatted: value.finalFormatted } : {})
+  };
 }
 
 function hasNonBlankEntries(values: string[]): boolean {

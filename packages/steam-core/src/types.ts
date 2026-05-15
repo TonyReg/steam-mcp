@@ -257,6 +257,15 @@ export interface StoreSearchOptions {
   limit?: number;
 }
 
+export interface StorePriceOverview {
+  currency?: string;
+  initialInCents: number;
+  finalInCents: number;
+  discountPercent: number;
+  initialFormatted?: string;
+  finalFormatted?: string;
+}
+
 export interface StoreAppDetails {
   appId: number;
   name: string;
@@ -271,6 +280,7 @@ export interface StoreAppDetails {
   shortDescription?: string;
   headerImage?: string;
   storeUrl: string;
+  priceOverview?: StorePriceOverview;
 }
 
 export interface OfficialStoreTopReleasesPage {
