@@ -146,7 +146,8 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       'steam_status',
       'steam_store_query',
       'steam_store_search',
-      'steam_wishlist'
+      'steam_wishlist',
+      'steam_wishlist_on_sale'
     ]);
     const collectionApplyTool = tools.tools.find((tool) => tool.name === 'steam_collection_apply');
     assert.ok(collectionApplyTool);
@@ -628,6 +629,120 @@ test('stdio server returns wishlist items through preload-patched wishlist endpo
   }
 });
 
+
+test('stdio server returns wishlist sale results with unknown price accounting through preload-patched wishlist and appdetails endpoints', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  fixture.env.STEAM_API_KEY = 'test-key';
+  const preloadPath = await writeOwnedGamesFetchPreload(
+    fixture.rootDir,
+    [],
+    {
+      620: JSON.stringify({
+        '620': {
+          success: true,
+          data: {
+            steam_appid: 620,
+            name: 'Portal 2',
+            type: 'game',
+            price_overview: {
+              currency: 'USD',
+              initial: 1999,
+              final: 499,
+              discount_percent: 75,
+              initial_formatted: '$19.99',
+              final_formatted: '$4.99'
+            }
+          }
+        }
+      }),
+      730: JSON.stringify({
+        '730': {
+          success: true,
+          data: {
+            steam_appid: 730,
+            name: 'Counter-Strike 2'
+          }
+        }
+      })
+    },
+    [],
+    [],
+    [],
+    [
+      { appid: 620, priority: 1, date_added: 1714000000 },
+      { appid: 730, priority: 2, date_added: 1715000000 }
+    ]
+  );
+  fixture.env.NODE_OPTIONS = [fixture.env.NODE_OPTIONS, `--import=${pathToFileURL(preloadPath).href}`].filter(Boolean).join(' ');
+
+  const client = new Client({ name: 'steam-mcp-test-client-wishlist-sale', version: '0.1.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(repoRoot, 'packages', 'steam-mcp', 'dist', 'index.js')],
+    cwd: repoRoot,
+    env: fixture.env,
+    stderr: 'pipe'
+  });
+
+  await client.connect(transport);
+
+  try {
+    const result = await client.callTool({
+      name: 'steam_wishlist_on_sale',
+      arguments: {
+        limit: 1
+      }
+    });
+    const payload = parseFirstTextContent(result) as {
+      totalCount: number;
+      onSaleCount: number;
+      unknownPriceCount: number;
+      items: Array<{
+        appId: number;
+        name?: string;
+        type?: string;
+        storeUrl?: string;
+        priority?: number;
+        dateAdded?: number;
+        price: {
+          currency?: string;
+          initialInCents: number;
+          finalInCents: number;
+          discountPercent: number;
+          initialFormatted?: string;
+          finalFormatted?: string;
+        };
+      }>;
+    };
+
+    assert.deepEqual(payload, {
+      totalCount: 2,
+      onSaleCount: 1,
+      unknownPriceCount: 1,
+      items: [
+        {
+          appId: 620,
+          name: 'Portal 2',
+          type: 'game',
+          storeUrl: 'https://store.steampowered.com/app/620/',
+          priority: 1,
+          dateAdded: 1714000000,
+          price: {
+            currency: 'USD',
+            initialInCents: 1999,
+            finalInCents: 499,
+            discountPercent: 75,
+            initialFormatted: '$19.99',
+            finalFormatted: '$4.99'
+          }
+        }
+      ]
+    });
+  } finally {
+    await client.close();
+  }
+});
 
 test('stdio server reorders steam_find_similar store matches in official mode through preload-patched store search and official prioritization', async () => {
   const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
