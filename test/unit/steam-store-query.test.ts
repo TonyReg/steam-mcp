@@ -6,6 +6,7 @@ import type {
   OfficialStoreQueryItemsResult,
   StoreAppDetails
 } from '@steam-mcp/steam-core';
+import type { WishlistListResult } from '../../packages/steam-core/src/types.js';
 import type { SteamMcpContext } from '../../packages/steam-mcp/src/context.js';
 import { registerSteamStoreQueryTool } from '../../packages/steam-mcp/src/tools/steam-store-query.js';
 
@@ -34,6 +35,7 @@ type StoreQueryResultItem = OfficialStoreItemSummary & {
   metadata?: StoreQueryResultMetadata;
   facets?: StoreQueryResultFacets;
   facetsAvailable?: boolean;
+  wishlist?: { listed: true; priority?: number; dateAdded?: number };
 };
 
 function parseFirstTextContent(result: ToolResult): unknown {
@@ -97,10 +99,15 @@ function createToolHarness(options: {
   queryItemsError?: Error;
   cacheableDetailsByAppId?: Record<number, StoreAppDetails | undefined>;
   cacheableDetailsErrorByAppId?: Record<number, Error>;
+  selectedUserId?: string;
+  wishlistResult?: WishlistListResult;
+  wishlistError?: Error;
 }) {
   const calls = {
     queryItems: [] as Array<unknown>,
-    getCacheableAppDetails: [] as number[]
+    getCacheableAppDetails: [] as number[],
+    discover: 0,
+    wishlistList: [] as Array<unknown>
   };
 
   const context = {
@@ -126,6 +133,27 @@ function createToolHarness(options: {
         }
 
         return options.cacheableDetailsByAppId?.[appId];
+      }
+    },
+    discoveryService: {
+      discover: async () => {
+        calls.discover += 1;
+        return {
+          userIds: options.selectedUserId ? [options.selectedUserId] : [],
+          selectedUserId: options.selectedUserId,
+          warnings: [],
+          libraryFolders: []
+        };
+      }
+    },
+    wishlistService: {
+      list: async (request: unknown) => {
+        calls.wishlistList.push(request);
+        if (options.wishlistError) {
+          throw options.wishlistError;
+        }
+
+        return options.wishlistResult ?? { totalCount: 0, items: [] };
       }
     }
   } as unknown as SteamMcpContext;
@@ -934,4 +962,69 @@ test('steam store query surfaces official query failures as an explicit error pa
   assert.deepEqual(parseFirstTextContent(result), {
     error: 'Steam Web API key is required for official store query access. Set STEAM_API_KEY.'
   });
+});
+
+test('steam store query annotates only matching wishlist items when requested', async () => {
+  const harness = createToolHarness({
+    selectedUserId: '12345',
+    queryItemsResult: {
+      items: [
+        createOfficialItem({ appId: 620, name: 'Portal 2', type: 'game', storeUrl: 'https://store.steampowered.com/app/620/' }),
+        createOfficialItem({ appId: 730, name: 'Counter-Strike 2', type: 'game', storeUrl: 'https://store.steampowered.com/app/730/' })
+      ]
+    },
+    wishlistResult: {
+      totalCount: 1,
+      items: [{ appId: 620, priority: 2, dateAdded: 1710000000 }]
+    }
+  });
+
+  const result = await harness.invoke({ includeWishlist: true });
+
+  assert.deepEqual(parseFirstTextContent(result), [
+    {
+      appId: 620,
+      name: 'Portal 2',
+      type: 'game',
+      storeUrl: 'https://store.steampowered.com/app/620/',
+      metadata: { source: 'query', filtersApplied: [], authoritativeFacetFiltering: false },
+      wishlist: { listed: true, priority: 2, dateAdded: 1710000000 }
+    },
+    {
+      appId: 730,
+      name: 'Counter-Strike 2',
+      type: 'game',
+      storeUrl: 'https://store.steampowered.com/app/730/',
+      metadata: { source: 'query', filtersApplied: [], authoritativeFacetFiltering: false }
+    }
+  ]);
+  assert.equal(harness.calls.discover, 1);
+  assert.deepEqual(harness.calls.wishlistList, [{ steamId: '76561197960278073' }]);
+});
+
+test('steam store query does not resolve wishlist when includeWishlist is omitted', async () => {
+  const harness = createToolHarness({
+    queryItemsResult: {
+      items: [createOfficialItem({ appId: 620, name: 'Portal 2', type: 'game', storeUrl: 'https://store.steampowered.com/app/620/' })]
+    }
+  });
+
+  await harness.invoke({});
+
+  assert.equal(harness.calls.discover, 0);
+  assert.deepEqual(harness.calls.wishlistList, []);
+});
+
+test('steam store query returns explicit wishlist errors when annotation lookup fails', async () => {
+  const harness = createToolHarness({
+    selectedUserId: '76561198000000000',
+    wishlistError: new Error('Official wishlist request failed with status 503.')
+  });
+
+  const result = await harness.invoke({ includeWishlist: true });
+
+  assert.deepEqual(parseFirstTextContent(result), {
+    error: 'Official wishlist request failed with status 503.'
+  });
+  assert.deepEqual(harness.calls.queryItems, []);
 });

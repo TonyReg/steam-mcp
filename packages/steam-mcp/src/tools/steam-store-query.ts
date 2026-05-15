@@ -3,10 +3,12 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {
   OfficialStoreItemSummary,
   OfficialStoreQueryItemsOptions,
-  StoreAppDetails
+  StoreAppDetails,
+  WishlistAnnotation
 } from '@steam-mcp/steam-core';
 import type { SteamMcpContext } from '../context.js';
 import { registerToolShallow } from '../mcp/register-tool-shallow.js';
+import { resolveWishlistAnnotations } from './wishlist-annotations.js';
 
 const STORE_QUERY_OVERFETCH_MULTIPLIER = 3;
 
@@ -20,6 +22,7 @@ const steamStoreQueryInputShape = {
   comingSoonOnly: z.boolean().optional(),
   freeToPlay: z.boolean().optional(),
   includeFacets: z.boolean().optional(),
+  includeWishlist: z.boolean().optional(),
   genres: z.array(z.string().min(1)).optional(),
   categories: z.array(z.string().min(1)).optional(),
   tags: z.array(z.string().min(1)).optional(),
@@ -49,6 +52,7 @@ type SteamStoreQueryResultItem = OfficialStoreItemSummary & {
   metadata: SteamStoreQueryMetadata;
   facets?: SteamStoreQueryFacets;
   facetsAvailable?: boolean;
+  wishlist?: WishlistAnnotation;
 };
 
 type SteamStoreQueryFacetMatch = {
@@ -202,6 +206,23 @@ function attachStoreQueryFacets(
   });
 }
 
+function attachWishlistAnnotations<T extends { appId: number }>(
+  items: T[],
+  annotations: ReadonlyMap<number, WishlistAnnotation>
+): T[] {
+  return items.map((item) => {
+    const wishlist = annotations.get(item.appId);
+    if (!wishlist) {
+      return item;
+    }
+
+    return {
+      ...item,
+      wishlist
+    };
+  });
+}
+
 function matchesFacetFamily(expected: string[] | undefined, actual: string[]): boolean {
   if (!expected || expected.length === 0) {
     return true;
@@ -333,12 +354,24 @@ export function registerSteamStoreQueryTool(server: McpServer, context: SteamMcp
       );
 
       try {
+        const wishlistLookup = args.includeWishlist
+          ? await resolveWishlistAnnotations(context, 'steam_store_query')
+          : undefined;
+        if (wishlistLookup?.ok === false) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ error: wishlistLookup.error }, null, 2) }]
+          };
+        }
+
         if (!requiresFacetFiltering) {
           const result = await context.officialStoreClient.queryItems(buildOfficialStoreQueryArgs(args));
           const metadataItems = attachStoreQueryMetadata(result.items, metadata);
-          const responseItems = args.includeFacets
+          const facetItems = args.includeFacets
             ? await enrichItemsWithOptionalFacets(context, metadataItems)
             : metadataItems;
+          const responseItems = wishlistLookup?.ok === true
+            ? attachWishlistAnnotations(facetItems, wishlistLookup.annotations)
+            : facetItems;
           return {
             content: [{ type: 'text', text: JSON.stringify(responseItems, null, 2) }]
           };
@@ -365,12 +398,15 @@ export function registerSteamStoreQueryTool(server: McpServer, context: SteamMcp
           filteredMatches.map(({ item }) => item),
           metadata
         );
-        const responseItems = args.includeFacets
+        const facetItems = args.includeFacets
           ? attachStoreQueryFacets(
               metadataItems,
               new Map(filteredMatches.map(({ item, details }) => [item.appId, details]))
             )
           : metadataItems;
+        const responseItems = wishlistLookup?.ok === true
+          ? attachWishlistAnnotations(facetItems, wishlistLookup.annotations)
+          : facetItems;
 
         return {
           content: [{ type: 'text', text: JSON.stringify(responseItems, null, 2) }]
