@@ -32,7 +32,8 @@ async function writeOwnedGamesFetchPreload(
   appDetailsPayloadById: Record<number, string> = {},
   recentlyPlayedGames: Array<Record<string, unknown>> = [],
   storeSearchItems: Array<Record<string, unknown>> = [],
-  prioritizedAppIds: number[] = []
+  prioritizedAppIds: number[] = [],
+  wishlistItems: Array<Record<string, unknown>> = []
 ): Promise<string> {
   const preloadPath = createPreloadPath(fixtureRoot);
   const script = `const ownedGames = ${JSON.stringify(appIds)};
@@ -40,6 +41,7 @@ const appDetailsPayloadById = ${JSON.stringify(appDetailsPayloadById)};
 const recentlyPlayedGames = ${JSON.stringify(recentlyPlayedGames)};
 const storeSearchItems = ${JSON.stringify(storeSearchItems)};
 const prioritizedAppIds = ${JSON.stringify(prioritizedAppIds)};
+const wishlistItems = ${JSON.stringify(wishlistItems)};
 const originalFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = async (input, init) => {
   const url = new URL(String(input));
@@ -66,6 +68,22 @@ globalThis.fetch = async (input, init) => {
     return new Response(JSON.stringify({
       response: {
         ids: prioritizedAppIds.map((appId) => ({ appid: appId }))
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+
+  if (url.hostname === 'api.steampowered.com' && url.pathname === '/IWishlistService/GetWishlistItemCount/v1/') {
+    return new Response(JSON.stringify({
+      response: {
+        count: wishlistItems.length
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+
+  if (url.hostname === 'api.steampowered.com' && url.pathname === '/IWishlistService/GetWishlist/v1/') {
+    return new Response(JSON.stringify({
+      response: {
+        items: wishlistItems
       }
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
@@ -127,7 +145,8 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       'steam_release_scout',
       'steam_status',
       'steam_store_query',
-      'steam_store_search'
+      'steam_store_search',
+      'steam_wishlist'
     ]);
     const collectionApplyTool = tools.tools.find((tool) => tool.name === 'steam_collection_apply');
     assert.ok(collectionApplyTool);
@@ -543,6 +562,67 @@ test('stdio server returns recently played games through preload-patched GetRece
         iconUrl: 'icon-620'
       }
     ]);
+  } finally {
+    await client.close();
+  }
+});
+
+
+test('stdio server returns wishlist items through preload-patched wishlist endpoints', async () => {
+  const repoRoot = path.resolve(path.join(import.meta.dirname, '..', '..'));
+  const fixture = await materializeSteamFixture(repoRoot);
+  fixture.env.STEAM_API_KEY = 'test-key';
+  const preloadPath = await writeOwnedGamesFetchPreload(
+    fixture.rootDir,
+    [],
+    {},
+    [],
+    [],
+    [],
+    [
+      { appid: 620, priority: 1, date_added: 1714000000 },
+      { appid: 730, priority: 2, date_added: 1715000000 }
+    ]
+  );
+  fixture.env.NODE_OPTIONS = [fixture.env.NODE_OPTIONS, `--import=${pathToFileURL(preloadPath).href}`].filter(Boolean).join(' ');
+
+  const client = new Client({ name: 'steam-mcp-test-client-wishlist', version: '0.1.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(repoRoot, 'packages', 'steam-mcp', 'dist', 'index.js')],
+    cwd: repoRoot,
+    env: fixture.env,
+    stderr: 'pipe'
+  });
+
+  await client.connect(transport);
+
+  try {
+    const result = await client.callTool({
+      name: 'steam_wishlist',
+      arguments: {
+        limit: 1
+      }
+    });
+    const payload = parseFirstTextContent(result) as {
+      totalCount: number;
+      items: Array<{
+        appId: number;
+        priority?: number;
+        dateAdded?: number;
+      }>;
+    };
+
+    assert.deepEqual(payload, {
+      totalCount: 2,
+      items: [
+        {
+          appId: 620,
+          priority: 1,
+          dateAdded: 1714000000
+        }
+      ]
+    });
   } finally {
     await client.close();
   }

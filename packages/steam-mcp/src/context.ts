@@ -14,7 +14,8 @@ import {
   SearchService,
   StatusService,
   SteamDiscoveryService,
-  StoreClient
+  StoreClient,
+  WishlistService
 } from '@steam-mcp/steam-core';
 
 export interface SteamMcpContext {
@@ -31,6 +32,7 @@ export interface SteamMcpContext {
   exportService: ExportService;
   linkService: LinkService;
   safetyService: SafetyService;
+  wishlistService: WishlistService;
 }
 
 export function createSteamMcpContext(env: NodeJS.ProcessEnv = process.env): SteamMcpContext {
@@ -58,6 +60,7 @@ export function createSteamMcpContext(env: NodeJS.ProcessEnv = process.env): Ste
   const recommendService = new RecommendService();
   const exportService = new ExportService();
   const statusService = new StatusService(configService, discoveryService, safetyService);
+  const wishlistService = new WishlistService(officialStoreClient);
 
   return {
     configService,
@@ -72,6 +75,7 @@ export function createSteamMcpContext(env: NodeJS.ProcessEnv = process.env): Ste
     recommendService,
     exportService,
     linkService,
-    safetyService
+    safetyService,
+    wishlistService
   };
 }

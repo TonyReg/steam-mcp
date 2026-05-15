@@ -13,6 +13,7 @@ import { registerSteamFeaturedScoutTool } from './tools/steam-featured-scout.js'
 import { registerSteamStatusTool } from './tools/steam-status.js';
 import { registerSteamReleaseScoutTool } from './tools/steam-release-scout.js';
 import { registerSteamRecentlyPlayedTool } from './tools/steam-recently-played.js';
+import { registerSteamWishlistTool } from './tools/steam-wishlist.js';
 import { registerSteamStoreQueryTool } from './tools/steam-store-query.js';
 import { registerSteamStoreSearchTool } from './tools/steam-store-search.js';
 
@@ -30,6 +31,7 @@ export function createServer(env: NodeJS.ProcessEnv = process.env, context: Stea
   registerSteamFeaturedScoutTool(server, context);
   registerSteamReleaseScoutTool(server, context);
   registerSteamRecentlyPlayedTool(server, context);
+  registerSteamWishlistTool(server, context);
   registerSteamFindSimilarTool(server, context);
   registerSteamCollectionPlanTool(server, context);
   registerSteamCollectionApplyTool(server, context);
