@@ -22,6 +22,27 @@ Recommended flow:
 
 This workflow depends on API-authoritative owned-library enumeration through `GetOwnedGames`. If `steam_status` reports missing `STEAM_API_KEY`, stop and ask for configuration instead of relying on stale local data.
 
+### `steam_wishlist_curator`
+
+Use this when an agent should curate the selected user's wishlist safely, including enriched wishlist inspection, sale discovery, deterministic wishlist search, Deck-focused shortlisting, discount summaries, export, and links.
+
+Arguments:
+
+- `goal` (required)
+- `limit` (optional string integer, for example `"20"`)
+- `deckStatus` (optional: `verified`, `playable`, `unsupported`, `unknown`)
+
+Recommended flow:
+
+1. `steam_status`
+2. `steam_wishlist` or `steam_wishlist_details`
+3. `steam_wishlist_search`
+4. `steam_wishlist_on_sale` or `steam_wishlist_discount_summary`
+5. `steam_wishlist_deck_shortlist`
+6. `steam_export` and `steam_link_generate`
+
+This workflow is read-only. It depends on a discoverable selected Steam user, a resolvable SteamID64, and `STEAM_API_KEY`. Official wishlist APIs provide membership/count data, while public appdetails enrichment supplies details, live price metadata, and optional Deck context. Preserve the existing caveats: `steam_wishlist_details` reports `missingDetailsCount` only for the scanned slice after any `limit`; `steam_wishlist_on_sale` may report `unknownPriceCount`; `steam_wishlist_discount_summary` counts ignore the returned-item limit; and `steam_wishlist_deck_shortlist` gives `query` precedence over `seedAppIds` when both are supplied.
+
 ### `steam_collection_planner`
 
 Use this when an agent should propose collection, favorite, or hidden-state changes without immediately mutating Steam-owned state.
@@ -76,11 +97,12 @@ Recommended flow:
 1. `steam_status`
 2. Choose exactly one primary path before calling any discovery surface
 3. Use `steam_library_curator` for owned-library analysis, recommendations, exports, and links; this is not the removed storefront curator/list discovery surface
-4. Use `steam_deck_backlog_triage` for Deck-friendly backlog asks, `steam_recently_played` for selected-user recent activity, `steam_find_similar` for “like this” / overlap intent, `steam_release_scout` for new or upcoming releases, `steam_featured_scout` for featured/editorial/promoted asks, `steam_store_query` for authenticated official catalog filtering, and `steam_store_search` for simpler public-store lookup
-5. Allow at most one adjacent fallback only if the primary path yields too few usable results or cannot satisfy the request honestly without changing semantics
-6. Keep fallbacks adjacent and explicit: release or featured discovery may fall back to `steam_store_query` for broader authenticated catalog lookup; `steam_store_query` may fall back to `steam_store_search` for simpler public-store lookup; recently played or library analysis may use `steam_find_similar` only as a follow-up comparison step
-7. Keep provenance explicit in the answer: name the chosen primary path, and if a fallback was needed, name that path and explain why
-8. `steam_export` and `steam_link_generate` for handoff and links after the main discovery step
+4. Use `steam_wishlist_curator` for selected-user wishlist curation, sale/discount discovery, wishlist search, or wishlist Deck shortlisting
+5. Use `steam_deck_backlog_triage` for Deck-friendly backlog asks, `steam_recently_played` for selected-user recent activity, `steam_find_similar` for “like this” / overlap intent, `steam_release_scout` for new or upcoming releases, `steam_featured_scout` for featured/editorial/promoted asks, `steam_store_query` for authenticated official catalog filtering, and `steam_store_search` for simpler public-store lookup
+6. Allow at most one adjacent fallback only if the primary path yields too few usable results or cannot satisfy the request honestly without changing semantics
+7. Keep fallbacks adjacent and explicit: release or featured discovery may fall back to `steam_store_query` for broader authenticated catalog lookup; `steam_store_query` may fall back to `steam_store_search` for simpler public-store lookup; recently played or library analysis may use `steam_find_similar` only as a follow-up comparison step; wishlist curation may use `steam_store_search` or `steam_link_generate` only after the wishlist primary step when public-store context or direct links are needed
+8. Keep provenance explicit in the answer: name the chosen primary path, and if a fallback was needed, name that path and explain why
+9. `steam_export` and `steam_link_generate` for handoff and links after the main discovery step
 
 This workflow must not revive the removed storefront curator/list surface. Do not route anything to that removed curator/list API path. If the selected primary path requires `STEAM_API_KEY` or selected-user resolution and `steam_status` reports that prerequisite missing, stop unless one adjacent public fallback still satisfies the same request honestly.
 

@@ -72,6 +72,7 @@ The exact config shape depends on the client, but the runtime entrypoint in this
 If your MCP client supports prompts, `steam-mcp` includes built-in workflows for common tasks:
 
 - `steam_library_curator` — safe library analysis, search, recommendations, exports, and links
+- `steam_wishlist_curator` — read-only selected-user wishlist curation, sale/discount discovery, wishlist search, Deck shortlisting, exports, and links
 - `steam_collection_planner` — plan-first collection or hidden-state changes with protected-collection awareness
 - `steam_deck_backlog_triage` — shortlist Steam Deck-friendly backlog candidates
 - `steam_discovery_router` — broad-intent discovery guidance that chooses one primary path and at most one adjacent fallback across the current validated Steam MCP discovery surface
