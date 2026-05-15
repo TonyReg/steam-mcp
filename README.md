@@ -12,6 +12,7 @@
 - Scout authenticated featured/editorial Steam marketing placements with `steam_featured_scout`
 - Scout upcoming or newly released Steam catalog apps with `steam_release_scout`
 - List recently played games with `steam_recently_played`
+- List selected-user wishlist items currently on sale with `steam_wishlist_on_sale`, derived from official wishlist data plus live public appdetails price metadata
 - Find similar games with deterministic ranking by default and optional official store prioritization via `steam_find_similar`
 - Export results as JSON or Markdown with `steam_export`
 - Generate `steam://` and web links with `steam_link_generate`
@@ -115,6 +116,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 | `steam_featured_scout` | Scout authenticated official Steam marketing placements for featured/editorial apps via `GetItemsToFeature`, with bounded limit, type, and locale guidance plus preserved marketing ordering after official enrichment, deduplication, and bounded filtering; requires a Steam Web API key |
 | `steam_release_scout` | Read-only upcoming/recent release scouting via official catalog access plus public appdetails enrichment, with optional locale passthrough and bounded human-readable facet filters; requires a Steam Web API key |
 | `steam_recently_played` | Read-only recently played game listing via the official Steam Web API; requires a Steam Web API key |
+| `steam_wishlist_on_sale` | Read-only selected-user wishlist sale view derived from official wishlist data plus live public appdetails `price_overview`; requires a Steam Web API key, reports `unknownPriceCount` for items with unknown price state, and omits those items from `items` |
 | `steam_find_similar` | Rank similar library or store candidates with deterministic ranking by default and optional official store prioritization for `scope="store"` or `scope="both"` |
 | `steam_collection_plan` | Create a durable preview plan for collection or hidden-state changes |
 | `steam_collection_apply` | Apply a generated plan when writes are enabled; plain apply performs the dirty stage, `finalize=true` completes finalize, and optional Windows orchestration can close Steam around apply calls, leave Steam closed after a dirty-only apply, and best-effort relaunch after finalize or a failed apply when the wrapper stopped Steam |
@@ -131,6 +133,7 @@ Default MCP-owned state lives under `%LOCALAPPDATA%/steam-mcp/`:
 - `steam_featured_scout` is read-only, requires `STEAM_API_KEY`, uses authenticated official marketing placements from `GetItemsToFeature` plus official store metadata enrichment, preserves marketing ordering after enrichment, deduplication, and bounded filtering, and is for featured/editorial discovery rather than release scouting
 - `steam_release_scout` is read-only and fails explicitly when no Steam Web API key is available
 - `steam_recently_played` is read-only and fails explicitly when no Steam Web API key is available or no selected Steam user can be resolved
+- `steam_wishlist_on_sale` is read-only, requires `STEAM_API_KEY`, derives sale state from live public appdetails `price_overview`, reports items with absent/incomplete/unavailable price metadata via `unknownPriceCount`, and omits those unknown-state items from `items`
 - `steam_find_similar` defaults to deterministic ranking; `mode="official"` is opt-in, only works with `scope="store"` or `scope="both"`, and fails explicitly when `STEAM_API_KEY` is unavailable or the selected user cannot be resolved to a SteamID64
 - Collection changes should follow the plan-first flow: preview with `steam_collection_plan`, then apply only after explicit confirmation and with writes enabled
 - Collection sync is explicitly limited to cloudstorage JSON files; it does not modify `localconfig.vdf`, LevelDB, `sharedconfig.vdf`, or undocumented Steam APIs
