@@ -4,7 +4,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {
   OfficialStoreItemsResult,
   OfficialStoreItemsToFeatureResult,
-  SteamFeaturedScoutResult
+  SteamFeaturedScoutResult,
+  WishlistListResult
 } from '../../packages/steam-core/src/types.js';
 import type { SteamMcpContext } from '../../packages/steam-mcp/src/context.js';
 import { registerSteamFeaturedScoutTool } from '../../packages/steam-mcp/src/tools/steam-featured-scout.js';
@@ -34,12 +35,17 @@ function createContext(options: {
   itemsResult?: OfficialStoreItemsResult;
   featuredError?: Error;
   itemsError?: Error;
+  selectedUserId?: string;
+  wishlistResult?: WishlistListResult;
+  wishlistError?: Error;
 }) {
   const calls = {
     getItemsToFeature: [] as Array<unknown>,
     getItems: [] as Array<unknown>,
     getTopReleasesPages: 0,
-    queryItems: [] as Array<unknown>
+    queryItems: [] as Array<unknown>,
+    discover: 0,
+    wishlistList: [] as Array<unknown>
   };
 
   const context = {
@@ -72,6 +78,27 @@ function createContext(options: {
       queryItems: async (request: unknown) => {
         calls.queryItems.push(request);
         throw new Error('queryItems should not be called');
+      }
+    },
+    discoveryService: {
+      discover: async () => {
+        calls.discover += 1;
+        return {
+          userIds: options.selectedUserId ? [options.selectedUserId] : [],
+          selectedUserId: options.selectedUserId,
+          warnings: [],
+          libraryFolders: []
+        };
+      }
+    },
+    wishlistService: {
+      list: async (request: unknown) => {
+        calls.wishlistList.push(request);
+        if (options.wishlistError) {
+          throw options.wishlistError;
+        }
+
+        return options.wishlistResult ?? { totalCount: 0, items: [] };
       }
     }
   } as unknown as SteamMcpContext;
@@ -286,4 +313,84 @@ test('steam featured scout returns explicit API-key failures from official marke
     error: 'Steam Web API key is required for official store marketing access. Set STEAM_API_KEY.'
   });
   assert.deepEqual(harness.calls.getItems, []);
+});
+
+test('steam featured scout annotates matching wishlist items only when requested', async () => {
+  const harness = createContext({
+    selectedUserId: '12345',
+    featuredResult: {
+      spotlights: [620, 730],
+      daily_deals: [],
+      specials: [],
+      purchase_recommendations: []
+    },
+    itemsResult: {
+      items: [
+        { appId: 620, name: 'Portal 2', type: 'game', comingSoon: false, storeUrl: 'https://store.steampowered.com/app/620/' },
+        { appId: 730, name: 'Counter-Strike 2', type: 'game', comingSoon: false, storeUrl: 'https://store.steampowered.com/app/730/' }
+      ]
+    },
+    wishlistResult: {
+      totalCount: 1,
+      items: [{ appId: 730, dateAdded: 1710000000 }]
+    }
+  });
+
+  const result = await harness.invoke({ limit: 2, types: ['game'], includeWishlist: true });
+
+  assert.deepEqual(parseFirstTextContent(result), [
+    {
+      appId: 620,
+      name: 'Portal 2',
+      type: 'game',
+      comingSoon: false,
+      source: 'marketing',
+      ordering: 'marketing',
+      method: 'itemsToFeature',
+      marketingBucket: 'spotlights',
+      filtersApplied: ['types:game'],
+      storeUrl: 'https://store.steampowered.com/app/620/'
+    },
+    {
+      appId: 730,
+      name: 'Counter-Strike 2',
+      type: 'game',
+      comingSoon: false,
+      source: 'marketing',
+      ordering: 'marketing',
+      method: 'itemsToFeature',
+      marketingBucket: 'spotlights',
+      filtersApplied: ['types:game'],
+      storeUrl: 'https://store.steampowered.com/app/730/',
+      wishlist: { listed: true, dateAdded: 1710000000 }
+    }
+  ]);
+  assert.equal(harness.calls.discover, 1);
+  assert.deepEqual(harness.calls.wishlistList, [{ steamId: '76561197960278073' }]);
+});
+
+test('steam featured scout does not resolve wishlist when includeWishlist is omitted', async () => {
+  const harness = createContext({
+    featuredResult: { spotlights: [620], daily_deals: [], specials: [], purchase_recommendations: [] },
+    itemsResult: { items: [{ appId: 620, name: 'Portal 2', type: 'game', comingSoon: false, storeUrl: 'https://store.steampowered.com/app/620/' }] }
+  });
+
+  await harness.invoke({ limit: 1, types: ['game'] });
+
+  assert.equal(harness.calls.discover, 0);
+  assert.deepEqual(harness.calls.wishlistList, []);
+});
+
+test('steam featured scout returns explicit wishlist lookup errors', async () => {
+  const harness = createContext({
+    selectedUserId: '76561198000000000',
+    wishlistError: new Error('Official wishlist request failed with status 503.')
+  });
+
+  const result = await harness.invoke({ includeWishlist: true });
+
+  assert.deepEqual(parseFirstTextContent(result), {
+    error: 'Official wishlist request failed with status 503.'
+  });
+  assert.deepEqual(harness.calls.getItemsToFeature, []);
 });

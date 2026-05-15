@@ -7,6 +7,7 @@ import type {
   OfficialStoreQueryItemsResult,
   StoreAppDetails
 } from '@steam-mcp/steam-core';
+import type { WishlistListResult } from '../../packages/steam-core/src/types.js';
 import type { SteamMcpContext } from '../../packages/steam-mcp/src/context.js';
 import { registerSteamReleaseScoutTool } from '../../packages/steam-mcp/src/tools/steam-release-scout.js';
 
@@ -24,7 +25,7 @@ function parseFirstTextContent(result: ToolResult): unknown {
   assert.ok(firstContent);
   assert.equal(firstContent.type, 'text');
   assert.equal(typeof firstContent.text, 'string');
-  return JSON.parse(firstContent.text);
+  return JSON.parse(firstContent.text ?? 'null');
 }
 
 function createContext(options: {
@@ -35,6 +36,9 @@ function createContext(options: {
   itemsError?: Error;
   queryItemsError?: Error;
   appDetailsMap?: Map<number, StoreAppDetails | undefined>;
+  selectedUserId?: string;
+  wishlistResult?: WishlistListResult;
+  wishlistError?: Error;
 }) {
   const calls = {
     getTopReleasesPages: 0,
@@ -42,7 +46,9 @@ function createContext(options: {
     queryItems: [] as Array<unknown>,
     getAppList: 0,
     getAppDetails: [] as number[],
-    getCacheableAppDetails: [] as number[]
+    getCacheableAppDetails: [] as number[],
+    discover: 0,
+    wishlistList: [] as Array<unknown>
   };
 
   const context = {
@@ -108,6 +114,27 @@ function createContext(options: {
         }
         throw new Error(`getCacheableAppDetails should not be called for ${String(appId)}`);
       }
+    },
+    discoveryService: {
+      discover: async () => {
+        calls.discover += 1;
+        return {
+          userIds: options.selectedUserId ? [options.selectedUserId] : [],
+          selectedUserId: options.selectedUserId,
+          warnings: [],
+          libraryFolders: []
+        };
+      }
+    },
+    wishlistService: {
+      list: async (request: unknown) => {
+        calls.wishlistList.push(request);
+        if (options.wishlistError) {
+          throw options.wishlistError;
+        }
+
+        return options.wishlistResult ?? { totalCount: 0, items: [] };
+      }
     }
   } as unknown as SteamMcpContext;
 
@@ -125,7 +152,10 @@ function createContext(options: {
 
   return {
     calls,
-    invoke: (rawArgs: unknown) => handler(rawArgs)
+    invoke(rawArgs: unknown) {
+      assert.ok(handler);
+      return handler(rawArgs);
+    }
   };
 }
 
@@ -936,5 +966,78 @@ test('steam release scout does not call getCacheableAppDetails when no facet fil
   assert.equal(parsed[0].appId, 10);
   // Verify getCacheableAppDetails was never invoked
   assert.deepEqual(harness.calls.getCacheableAppDetails, []);
+});
+
+test('steam release scout annotates matching wishlist items only when requested', async () => {
+  const harness = createContext({
+    selectedUserId: '12345',
+    queryItemsResult: {
+      items: [
+        { appId: 10, name: 'Future Game', type: 'game', releaseDate: 'Coming soon', comingSoon: true, storeUrl: 'https://store.steampowered.com/app/10/' },
+        { appId: 11, name: 'Future DLC', type: 'dlc', releaseDate: 'Coming soon', comingSoon: true, storeUrl: 'https://store.steampowered.com/app/11/' }
+      ]
+    },
+    wishlistResult: {
+      totalCount: 1,
+      items: [{ appId: 11, priority: 4 }]
+    }
+  });
+
+  const result = await harness.invoke({ limit: 2, types: ['game', 'dlc'], includeWishlist: true });
+
+  assert.deepEqual(parseFirstTextContent(result), [
+    {
+      appId: 10,
+      name: 'Future Game',
+      type: 'game',
+      releaseDate: 'Coming soon',
+      comingSoon: true,
+      source: 'query',
+      ordering: 'query',
+      filtersApplied: ['types:game,dlc', 'comingSoonOnly:true'],
+      storeUrl: 'https://store.steampowered.com/app/10/'
+    },
+    {
+      appId: 11,
+      name: 'Future DLC',
+      type: 'dlc',
+      releaseDate: 'Coming soon',
+      comingSoon: true,
+      source: 'query',
+      ordering: 'query',
+      filtersApplied: ['types:game,dlc', 'comingSoonOnly:true'],
+      storeUrl: 'https://store.steampowered.com/app/11/',
+      wishlist: { listed: true, priority: 4 }
+    }
+  ]);
+  assert.equal(harness.calls.discover, 1);
+  assert.deepEqual(harness.calls.wishlistList, [{ steamId: '76561197960278073' }]);
+});
+
+test('steam release scout does not resolve wishlist when includeWishlist is omitted', async () => {
+  const harness = createContext({
+    queryItemsResult: {
+      items: [{ appId: 10, name: 'Future Game', type: 'game', releaseDate: 'Coming soon', comingSoon: true, storeUrl: 'https://store.steampowered.com/app/10/' }]
+    }
+  });
+
+  await harness.invoke({ types: ['game'] });
+
+  assert.equal(harness.calls.discover, 0);
+  assert.deepEqual(harness.calls.wishlistList, []);
+});
+
+test('steam release scout returns explicit wishlist lookup errors', async () => {
+  const harness = createContext({
+    selectedUserId: '76561198000000000',
+    wishlistError: new Error('Official wishlist request failed with status 503.')
+  });
+
+  const result = await harness.invoke({ includeWishlist: true });
+
+  assert.deepEqual(parseFirstTextContent(result), {
+    error: 'Official wishlist request failed with status 503.'
+  });
+  assert.deepEqual(harness.calls.queryItems, []);
 });
 

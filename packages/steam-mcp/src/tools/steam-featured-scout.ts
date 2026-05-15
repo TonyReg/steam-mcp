@@ -5,10 +5,12 @@ import type {
   OfficialStoreItemsToFeatureOptions,
   OfficialStoreItemsToFeatureResult,
   OfficialStoreItemSummary,
-  SteamFeaturedScoutResult
+  SteamFeaturedScoutResult,
+  WishlistAnnotation
 } from '../../../steam-core/src/types.js';
 import type { SteamMcpContext } from '../context.js';
 import { registerToolShallow } from '../mcp/register-tool-shallow.js';
+import { resolveWishlistAnnotations } from './wishlist-annotations.js';
 
 const steamFeaturedScoutTypeSchema = z.enum(['game', 'software', 'dlc']);
 
@@ -16,7 +18,8 @@ const steamFeaturedScoutInputShape = {
   limit: z.number().int().min(1).max(100).optional(),
   types: z.array(steamFeaturedScoutTypeSchema).optional(),
   language: z.string().min(1).optional(),
-  countryCode: z.string().min(1).optional()
+  countryCode: z.string().min(1).optional(),
+  includeWishlist: z.boolean().optional()
 };
 
 const steamFeaturedScoutArgsSchema = z.object(steamFeaturedScoutInputShape);
@@ -34,6 +37,10 @@ const FEATURED_OVERFETCH_MULTIPLIER = 3;
 function getFeaturedCandidateLimit(limit: number): number {
   return Math.min(100, Math.max(limit, limit * FEATURED_OVERFETCH_MULTIPLIER));
 }
+
+type SteamFeaturedScoutResultWithWishlist = SteamFeaturedScoutResult & {
+  wishlist?: WishlistAnnotation;
+};
 
 function collectFeaturedCandidates(
   payload: OfficialStoreItemsToFeatureResult,
@@ -116,6 +123,15 @@ export function registerSteamFeaturedScoutTool(server: McpServer, context: Steam
       const officialMarketingClient = getOfficialMarketingClient(context);
 
       try {
+        const wishlistLookup = args.includeWishlist
+          ? await resolveWishlistAnnotations(context, 'steam_featured_scout')
+          : undefined;
+        if (wishlistLookup?.ok === false) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ error: wishlistLookup.error }, null, 2) }]
+          };
+        }
+
         const featuredResult = await officialMarketingClient.getItemsToFeature({
           ...(language === undefined ? {} : { language }),
           ...(countryCode === undefined ? {} : { countryCode })
@@ -136,7 +152,7 @@ export function registerSteamFeaturedScoutTool(server: McpServer, context: Steam
 
         const itemsByAppId = new Map(itemsResult.items.map((item) => [item.appId, item]));
         const filtersApplied = buildFiltersApplied(types);
-        const results: SteamFeaturedScoutResult[] = [];
+        const results: SteamFeaturedScoutResultWithWishlist[] = [];
 
         for (const candidate of candidates) {
           const item = itemsByAppId.get(candidate.appId);
@@ -149,7 +165,11 @@ export function registerSteamFeaturedScoutTool(server: McpServer, context: Steam
             continue;
           }
 
-          results.push(result);
+          const wishlist = wishlistLookup?.ok === true ? wishlistLookup.annotations.get(result.appId) : undefined;
+          results.push({
+            ...result,
+            ...(wishlist === undefined ? {} : { wishlist })
+          });
           if (results.length >= limit) {
             break;
           }

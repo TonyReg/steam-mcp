@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { SteamReleaseScoutResult, StoreAppDetails } from '@steam-mcp/steam-core';
+import type { SteamReleaseScoutResult, StoreAppDetails, WishlistAnnotation } from '@steam-mcp/steam-core';
 import type { SteamMcpContext } from '../context.js';
 import { registerToolShallow } from '../mcp/register-tool-shallow.js';
+import { resolveWishlistAnnotations } from './wishlist-annotations.js';
 
 const steamReleaseScoutTypeSchema = z.enum(['game', 'software', 'dlc']);
 
@@ -13,6 +14,7 @@ const steamReleaseScoutInputShape = {
   countryCode: z.string().min(1).optional(),
   comingSoonOnly: z.boolean().optional(),
   freeToPlay: z.boolean().optional(),
+  includeWishlist: z.boolean().optional(),
   genres: z.array(z.string()).optional(),
   categories: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional()
@@ -26,6 +28,10 @@ const UPCOMING_QUERY_OVERFETCH_MULTIPLIER = 3;
 function getUpcomingQueryCandidateLimit(limit: number): number {
   return Math.min(100, Math.max(limit, limit * UPCOMING_QUERY_OVERFETCH_MULTIPLIER));
 }
+
+type SteamReleaseScoutResultWithWishlist = SteamReleaseScoutResult & {
+  wishlist?: WishlistAnnotation;
+};
 
 export function registerSteamReleaseScoutTool(server: McpServer, context: SteamMcpContext): void {
   registerToolShallow(
@@ -59,6 +65,15 @@ export function registerSteamReleaseScoutTool(server: McpServer, context: SteamM
       const requiresAuthoritativeFacetFiltering = facetGenres !== undefined || facetCategories !== undefined || facetTags !== undefined;
 
       try {
+        const wishlistLookup = args.includeWishlist
+          ? await resolveWishlistAnnotations(context, 'steam_release_scout')
+          : undefined;
+        if (wishlistLookup?.ok === false) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ error: wishlistLookup.error }, null, 2) }]
+          };
+        }
+
         let itemsResult;
         let orderedAppIds: number[];
 
@@ -103,7 +118,7 @@ export function registerSteamReleaseScoutTool(server: McpServer, context: SteamM
         }
 
         const itemsByAppId = new Map(itemsResult.items.map((item) => [item.appId, item]));
-        const results: SteamReleaseScoutResult[] = [];
+        const results: SteamReleaseScoutResultWithWishlist[] = [];
         const filtersApplied = [
           `types:${types.join(',')}`,
           `comingSoonOnly:${String(comingSoonOnly)}`,
@@ -167,6 +182,8 @@ export function registerSteamReleaseScoutTool(server: McpServer, context: SteamM
             }
           }
 
+          const wishlist = wishlistLookup?.ok === true ? wishlistLookup.annotations.get(item.appId) : undefined;
+
           results.push({
             appId: item.appId,
             name: item.name,
@@ -177,7 +194,8 @@ export function registerSteamReleaseScoutTool(server: McpServer, context: SteamM
             source,
             ordering: source,
             filtersApplied,
-            storeUrl: item.storeUrl
+            storeUrl: item.storeUrl,
+            ...(wishlist === undefined ? {} : { wishlist })
           });
 
           if (results.length >= limit) {
