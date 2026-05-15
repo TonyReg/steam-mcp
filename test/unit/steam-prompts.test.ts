@@ -45,6 +45,43 @@ function createPromptHarness() {
   };
 }
 
+test('steam wishlist curator prompt renders goal, limit, deck guidance, and wishlist tool flow', async () => {
+  const harness = createPromptHarness();
+
+  const result = await harness.invoke('steam_wishlist_curator', {
+    goal: 'Find discounted Deck-friendly wishlist games',
+    limit: '12',
+    deckStatus: 'verified'
+  });
+  const text = renderFirstPromptText(result);
+
+  assert.match(text, /Goal: Find discounted Deck-friendly wishlist games/);
+  assert.match(text, /Requested result limit: 12/);
+  assert.match(text, /Prefer this Steam Deck status when useful: verified/);
+  assert.match(text, /steam_wishlist_details/);
+  assert.match(text, /steam_wishlist_search/);
+  assert.match(text, /steam_wishlist_on_sale/);
+  assert.match(text, /steam_wishlist_discount_summary/);
+  assert.match(text, /steam_wishlist_deck_shortlist/);
+  assert.match(text, /steam_export/);
+  assert.match(text, /steam_link_generate/);
+  assert.match(text, /STEAM_API_KEY/);
+  assert.match(text, /SteamID64/);
+});
+
+test('steam wishlist curator prompt uses default guidance when optional args are omitted', async () => {
+  const harness = createPromptHarness();
+
+  const result = await harness.invoke('steam_wishlist_curator', {
+    goal: 'Prioritize my wishlist'
+  });
+  const text = renderFirstPromptText(result);
+
+  assert.match(text, /Goal: Prioritize my wishlist/);
+  assert.match(text, /Requested result limit: leave unset unless the user explicitly wants a shorter wishlist slice/);
+  assert.match(text, /Use Deck filters only when they improve the wishlist answer/);
+});
+
 test('steam recently played prompt renders limit and prerequisite guidance', async () => {
   const harness = createPromptHarness();
 
@@ -178,6 +215,9 @@ test('steam discovery router prompt renders single-primary routing with bounded 
   assert.match(text, /steam_store_query/);
   assert.match(text, /steam_store_search/);
   assert.match(text, /steam_library_curator/);
+  assert.match(text, /wishlist-centric/);
+  assert.match(text, /steam_wishlist_curator/);
+  assert.match(text, /wishlist curation, sale\/discount discovery, wishlist search, or wishlist Deck shortlisting/);
   assert.match(text, /removed storefront curator\/list discovery surface/);
   assert.match(text, /STEAM_API_KEY/);
 });

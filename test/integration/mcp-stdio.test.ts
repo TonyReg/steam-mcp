@@ -170,7 +170,8 @@ test('stdio server registers exact tools and answers basic calls', async () => {
       'steam_library_curator',
       'steam_recently_played',
       'steam_release_scout',
-      'steam_store_query'
+      'steam_store_query',
+      'steam_wishlist_curator'
     ]);
 
     const collectionPlannerPrompt = await client.getPrompt({

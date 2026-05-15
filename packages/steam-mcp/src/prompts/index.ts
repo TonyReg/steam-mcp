@@ -10,6 +10,13 @@ const steamLibraryCuratorPromptArgs = {
 };
 const steamLibraryCuratorPromptSchema = z.object(steamLibraryCuratorPromptArgs);
 
+const steamWishlistCuratorPromptArgs = {
+  goal: z.string().min(1),
+  limit: z.string().optional().describe('Optional integer result limit as a string, for example "20".'),
+  deckStatus: deckStatusSchema.optional()
+};
+const steamWishlistCuratorPromptSchema = z.object(steamWishlistCuratorPromptArgs);
+
 const steamCollectionPlannerPromptArgs = {
   request: z.string().min(1),
   mode: planModeSchema.optional()
@@ -95,6 +102,15 @@ function parseSteamRecentlyPlayedPromptLimit(rawLimit: string | undefined): numb
 }
 
 function parseSteamDiscoveryRouterPromptLimit(rawLimit: string | undefined): number | undefined {
+  const trimmed = rawLimit?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return z.coerce.number().int().min(1).max(100).parse(trimmed);
+}
+
+function parseSteamWishlistCuratorPromptLimit(rawLimit: string | undefined): number | undefined {
   const trimmed = rawLimit?.trim();
   if (!trimmed) {
     return undefined;
@@ -237,6 +253,45 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
 
   registerPromptShallow(
     server,
+    'steam_wishlist_curator',
+    {
+      title: 'Steam wishlist curator',
+      description: 'Guide an agent through read-only selected-user wishlist curation, sale discovery, search, Deck shortlisting, discount summaries, exports, and links.',
+      argsSchema: steamWishlistCuratorPromptArgs
+    },
+    (rawArgs: unknown) => {
+      const parsedArgs = steamWishlistCuratorPromptSchema.parse(rawArgs);
+      const limit = parseSteamWishlistCuratorPromptLimit(parsedArgs.limit);
+
+      return {
+        description: 'Read-only workflow for curating the selected user\'s Steam wishlist with sale, search, and Deck-shortlist guidance.',
+        messages: [{
+          role: 'user',
+          content: {
+            type: 'text',
+            text: [
+              'Use the Steam MCP to curate the selected user\'s wishlist safely.',
+              `Goal: ${parsedArgs.goal}`,
+              limit === undefined ? 'Requested result limit: leave unset unless the user explicitly wants a shorter wishlist slice.' : `Requested result limit: ${limit}.`,
+              parsedArgs.deckStatus ? `Prefer this Steam Deck status when useful: ${parsedArgs.deckStatus}.` : 'Use Deck filters only when they improve the wishlist answer.',
+              'Workflow:',
+              '1. Call steam_status first and confirm the selected Steam user, whether Steam Web API access is available, and whether the selected user can be resolved to a SteamID64.',
+              '2. If steam_status reports that STEAM_API_KEY is unavailable, stop and tell the user steam_wishlist_curator requires authenticated Steam Web API access.',
+              '3. If there is no selected Steam user or the selected user cannot be resolved to a SteamID64, stop and tell the user the wishlist workflow cannot run until the selected-user issue is fixed.',
+              '4. Use steam_wishlist for a fast raw membership/count pass or steam_wishlist_details when enriched appdetails metadata or Deck status context is needed.',
+              '5. Use steam_wishlist_search for query-driven filtering, steam_wishlist_on_sale or steam_wishlist_discount_summary for sale/discount intent, and steam_wishlist_deck_shortlist for Deck-specific wishlist shortlisting.',
+              '6. Wishlist tools remain read-only: official wishlist APIs provide membership/count data, while public appdetails enrichment may add details, Deck context, or live price metadata where applicable.',
+              '7. Preserve the existing result caveats: steam_wishlist_details reports missingDetailsCount only for the scanned slice after any limit; steam_wishlist_on_sale may report unknownPriceCount for items with unknown price state; steam_wishlist_discount_summary counts ignore the returned-item limit; and steam_wishlist_deck_shortlist gives query precedence over seedAppIds when both are supplied.',
+              '8. Use steam_export for JSON/Markdown handoff and steam_link_generate for store or launch links after the wishlist pass.'
+            ].join('\n')
+          }
+        }]
+      };
+    }
+  );
+
+  registerPromptShallow(
+    server,
     'steam_collection_planner',
     {
       title: 'Steam collection planner',
@@ -332,12 +387,12 @@ export function registerSteamPrompts(server: McpServer, context: SteamMcpContext
               limit === undefined ? 'Requested result limit: leave unset unless the user explicitly wants a shorter shortlist.' : `Requested result limit: ${limit}.`,
               preferredSource ? `Preferred routing hint: ${preferredSource}.` : 'Preferred routing hint: auto-detect from the request.',
               'Workflow:',
-              '1. Call steam_status first and confirm the selected Steam user, whether `STEAM_API_KEY` is available, and whether the request is library-centric, store-centric, release-centric, featured/editorial, similar-title, or recent-play driven.',
+              '1. Call steam_status first and confirm the selected Steam user, whether `STEAM_API_KEY` is available, and whether the request is library-centric, wishlist-centric, store-centric, release-centric, featured/editorial, similar-title, or recent-play driven.',
               '2. Choose exactly one primary path before calling any discovery tool or prompt.',
               '3. Use steam_library_curator when the ask is about owned-library analysis, recommendations, exports, or links. Do not confuse steam_library_curator with the removed storefront curator/list discovery surface.',
-              '4. Use steam_deck_backlog_triage for Deck-friendly backlog prioritization, steam_recently_played for selected-user recent activity, steam_find_similar for “like this / more like this” intent, steam_release_scout for new/upcoming/release intent, steam_featured_scout for featured/editorial/promoted intent, steam_store_query for authenticated official catalog filtering, and steam_store_search for simpler unauthenticated public-store lookup.',
+              '4. Use steam_wishlist_curator for selected-user wishlist curation, sale/discount discovery, wishlist search, or wishlist Deck shortlisting. Use steam_deck_backlog_triage for Deck-friendly backlog prioritization, steam_recently_played for selected-user recent activity, steam_find_similar for “like this / more like this” intent, steam_release_scout for new/upcoming/release intent, steam_featured_scout for featured/editorial/promoted intent, steam_store_query for authenticated official catalog filtering, and steam_store_search for simpler unauthenticated public-store lookup.',
               '5. You may use at most one adjacent fallback only if the primary path returns too few usable results or the chosen path cannot satisfy the request without changing semantics.',
-              '6. Keep fallbacks adjacent and explicit: release or featured discovery may fall back to steam_store_query for broader authenticated catalog lookup; steam_store_query may fall back to steam_store_search for simpler public-store lookup; recently played or library analysis may use steam_find_similar only as a follow-up comparison step.',
+              '6. Keep fallbacks adjacent and explicit: release or featured discovery may fall back to steam_store_query for broader authenticated catalog lookup; steam_store_query may fall back to steam_store_search for simpler public-store lookup; recently played or library analysis may use steam_find_similar only as a follow-up comparison step. Wishlist curation may use steam_store_search or steam_link_generate only for public store context and links after the wishlist primary step.',
               '7. If the primary path requires `STEAM_API_KEY` or selected-user resolution and steam_status shows that prerequisite is missing, stop and tell the user unless one adjacent public fallback still satisfies the same request honestly.',
               '8. Do not route anything to the removed storefront curator/list discovery surface. That path was removed after upstream validation failed. steam_library_curator is still valid because it is the owned-library workflow, not storefront curator discovery.',
               '9. Preserve provenance in the answer: say which primary path you chose, whether a fallback was used, and why.',
