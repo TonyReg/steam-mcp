@@ -70,7 +70,7 @@ export class OfficialStoreClient {
         ids: request.appIds.map((appId) => ({ appid: appId })),
         context: {
           language: request.language ?? 'english',
-          country_code: request.countryCode ?? 'US'
+          ...(request.countryCode !== undefined ? { country_code: request.countryCode } : {})
         },
         data_request: {
           include_basic_info: true,
@@ -92,7 +92,7 @@ export class OfficialStoreClient {
       {
         context: {
           language: request.language ?? 'english',
-          country_code: request.countryCode ?? 'US'
+          ...(request.countryCode !== undefined ? { country_code: request.countryCode } : {})
         }
       },
       'Steam Web API key is required for official store marketing access. Set STEAM_API_KEY.',
@@ -135,7 +135,7 @@ export class OfficialStoreClient {
         },
         context: {
           language: request.language ?? 'english',
-          country_code: request.countryCode ?? 'US'
+          ...(request.countryCode !== undefined ? { country_code: request.countryCode } : {})
         },
         data_request: {
           include_basic_info: true,

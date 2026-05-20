@@ -113,6 +113,35 @@ test('official store client calls GetItemsToFeature with input_json locale paylo
   });
 });
 
+test('official store client omits country_code from GetItemsToFeature when countryCode is unset', async () => {
+  const requestedUrls: string[] = [];
+  const client = new OfficialStoreClient({
+    steamWebApiKey: 'test-key',
+    fetchImpl: async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      requestedUrls.push(url.toString());
+      return new Response(JSON.stringify({
+        response: {
+          spotlights: [],
+          daily_deals: [],
+          specials: [],
+          purchase_recommendations: []
+        }
+      }), { status: 200, headers: { 'content-type': 'application/json' } }) as Response;
+    }
+  });
+
+  await client.getItemsToFeature({ language: 'japanese' });
+
+  const requestUrl = new URL(requestedUrls[0] ?? '');
+  const inputJson = JSON.parse(requestUrl.searchParams.get('input_json') ?? '{}') as Record<string, unknown>;
+  assert.deepEqual(inputJson, {
+    context: {
+      language: 'japanese'
+    }
+  });
+});
+
 test('official store client rejects marketing calls when no API key is configured', async () => {
   const client = new OfficialStoreClient({
     fetchImpl: async () => {
@@ -270,8 +299,7 @@ test('official store client calls GetItems with input_json request payload and n
   assert.deepEqual(inputJson, {
     ids: [{ appid: 620 }, { appid: 730 }, { appid: 420 }, { appid: 500 }],
     context: {
-      language: 'english',
-      country_code: 'US'
+      language: 'english'
     },
     data_request: {
       include_basic_info: true,
@@ -448,8 +476,7 @@ test('official store client calls Query with input_json request payload and norm
       }
     },
     context: {
-      language: 'english',
-      country_code: 'US'
+      language: 'english'
     },
     data_request: {
       include_basic_info: true,
