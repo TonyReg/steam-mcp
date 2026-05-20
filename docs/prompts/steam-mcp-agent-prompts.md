@@ -168,7 +168,7 @@ Recommended flow:
 
 1. `steam_status`
 2. `steam_featured_scout`
-3. Use optional `language` / `countryCode` when the user wants locale-scoped official marketing results; otherwise keep the official client defaults.
+3. Use optional `language` / `countryCode` when the user wants locale-scoped official marketing results; otherwise leave them unset.
 4. Use optional `types` when the user wants to keep only specific app families after official enrichment; explain that returned results preserve marketing ordering after enrichment, deduplication, and bounded filtering.
 5. Switch to `steam_release_scout` for release-specific scouting, `steam_store_query` for broader authenticated catalog filtering, and `steam_store_search` for unauthenticated public-store lookup.
 6. `steam_export` and `steam_link_generate` when handoff or direct store links are useful.

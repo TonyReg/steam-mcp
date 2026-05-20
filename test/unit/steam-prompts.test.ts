@@ -154,7 +154,7 @@ test('steam store query prompt uses default guidance when optional filters are o
   assert.match(text, /Requested result limit: leave unset so official client defaults apply/);
   assert.match(text, /Requested store item types: no explicit type filter/);
   assert.match(text, /Requested language: leave unset so the official client locale default applies/);
-  assert.match(text, /Requested country code: leave unset so the official client country default applies/);
+  assert.match(text, /Requested country code: leave unset unless locale scoping is needed/);
   assert.match(text, /Coming soon only filter: leave unset so official client defaults apply/);
   assert.match(text, /Free to play filter: no explicit filter/);
   assert.match(text, /Include human-readable facets: false unless explicitly requested/);
@@ -193,7 +193,7 @@ test('steam featured scout prompt uses default bounded guidance when optional ar
   assert.match(text, /Requested result limit: 20/);
   assert.match(text, /Requested featured item types: game, software, dlc/);
   assert.match(text, /Requested language: default official client locale/);
-  assert.match(text, /Requested country code: default official client locale/);
+  assert.match(text, /Requested country code: leave unset unless locale scoping is needed/);
 });
 
 test('steam discovery router prompt renders single-primary routing with bounded fallback guidance', async () => {
