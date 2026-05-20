@@ -44,5 +44,5 @@ steam_export
 ## Notes
 
 - Use the prompt defaults unless the user explicitly wants to narrow the featured shortlist.
-- Leave `language` and `countryCode` unset when the user wants the official client defaults to apply.
+- Leave `language` and `countryCode` unset unless the user explicitly wants locale-scoped featured results.
 - Prefer `steam_release_scout` instead of `steam_featured_scout` when the user is really asking for upcoming or newly released titles rather than featured/editorial placements.

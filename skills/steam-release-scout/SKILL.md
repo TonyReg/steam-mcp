@@ -43,5 +43,5 @@ steam_export
 
 - Use the prompt defaults unless the user asks to narrow or widen the release window.
 - Prefer `comingSoonOnly=true` when the user asks for upcoming releases and `comingSoonOnly=false` when they want both upcoming and recent releases.
-- Use `language` and `countryCode` only when the user explicitly wants locale-scoped catalog results; otherwise let the official client defaults apply.
+- Use `language` and `countryCode` only when the user explicitly wants locale-scoped catalog results; otherwise leave them unset.
 - Use `freeToPlay=true` or `freeToPlay=false` only when the user explicitly wants to narrow by pricing model.

@@ -43,6 +43,6 @@ steam_export
 
 ## Notes
 
-- Leave optional filters unset when the user wants the official client defaults to apply.
+- Leave optional filters unset unless the user explicitly wants locale scoping, release-state narrowing, pricing-model narrowing, or facet filtering.
 - Prefer `steam_store_search` instead of `steam_store_query` when the user does not need authenticated official filtering.
 - Keep reasoning explicit: result limits, type filters, locale context, release state, pricing model, include/exclude facet filters, additive metadata, and optional facet enrichment.
