@@ -45,7 +45,7 @@ skills/
   - Steam Deck backlog filtering and deterministic shortlist generation from the owned library
 
 - **`steam-discovery-router`**
-  - prompt-first guidance for broad Steam discovery asks that need one primary path plus at most one adjacent fallback
+  - prompt-first guidance for broad Steam discovery asks that evaluate plausible surfaces before choosing one primary path plus at most one adjacent fallback
   - keeps provenance explicit while routing only across the current validated discovery surface
 
 - **`steam-recently-played`**
