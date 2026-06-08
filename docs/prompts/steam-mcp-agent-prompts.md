@@ -84,7 +84,7 @@ This workflow also depends on API-authoritative owned-library enumeration. If `s
 
 ### `steam_discovery_router`
 
-Use this when an agent should route a broad discovery request to the right current Steam MCP surface without inventing a new endpoint or collapsing the discovery tools into one opaque path.
+Use this when an agent should evaluate plausible current Steam MCP discovery surfaces for a broad request, then route to the right one without inventing a new endpoint or collapsing the discovery tools into one opaque path.
 
 Arguments:
 
@@ -95,12 +95,12 @@ Arguments:
 Recommended flow:
 
 1. `steam_status`
-2. Choose exactly one primary path before calling any discovery surface
+2. Evaluate all plausible candidate discovery surfaces against the request and prerequisites, then choose exactly one primary path before calling any discovery surface
 3. Use `steam_library_curator` for owned-library analysis, recommendations, exports, and links; this is not the removed storefront curator/list discovery surface
 4. Use `steam_wishlist_curator` for selected-user wishlist curation, sale/discount discovery, wishlist search, or wishlist Deck shortlisting
 5. Use `steam_deck_backlog_triage` for Deck-friendly backlog asks, `steam_recently_played` for selected-user recent activity, `steam_find_similar` for “like this” / overlap intent, `steam_release_scout` for new or upcoming releases, `steam_featured_scout` for featured/editorial/promoted asks, `steam_store_query` for authenticated official catalog filtering, and `steam_store_search` for simpler public-store lookup
 6. Allow at most one adjacent fallback only if the primary path yields too few usable results or cannot satisfy the request honestly without changing semantics
-7. Keep fallbacks adjacent and explicit: release or featured discovery may fall back to `steam_store_query` for broader authenticated catalog lookup; `steam_store_query` may fall back to `steam_store_search` for simpler public-store lookup; recently played or library analysis may use `steam_find_similar` only as a follow-up comparison step; wishlist curation may use `steam_store_search` or `steam_link_generate` only after the wishlist primary step when public-store context or direct links are needed
+7. Keep fallbacks adjacent and explicit: release or featured discovery may fall back to `steam_store_query` for broader authenticated catalog lookup; `steam_store_query` may fall back to `steam_store_search` for simpler public-store lookup; recently played or library analysis may use `steam_find_similar` only as a follow-up comparison step; wishlist curation may use `steam_store_search` only as an adjacent discovery fallback when public-store context is needed, and `steam_link_generate` only after the wishlist primary step when direct links are needed
 8. Keep provenance explicit in the answer: name the chosen primary path, and if a fallback was needed, name that path and explain why
 9. `steam_export` and `steam_link_generate` for handoff and links after the main discovery step
 
