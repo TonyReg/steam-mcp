@@ -194,7 +194,8 @@ test('stdio server registers exact tools and answers basic calls', async () => {
         preferredSource: 'featured'
       }
     });
-    assert.match(JSON.stringify(discoveryRouterPrompt), /Choose exactly one primary path/);
+    assert.match(JSON.stringify(discoveryRouterPrompt), /Evaluate all plausible candidate discovery surfaces/);
+    assert.match(JSON.stringify(discoveryRouterPrompt), /choose exactly one primary path/i);
     assert.match(JSON.stringify(discoveryRouterPrompt), /at most one adjacent fallback/);
     assert.match(JSON.stringify(discoveryRouterPrompt), /steam_featured_scout/);
     assert.match(JSON.stringify(discoveryRouterPrompt), /steam_store_query/);

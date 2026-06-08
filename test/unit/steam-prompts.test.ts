@@ -209,7 +209,8 @@ test('steam discovery router prompt renders single-primary routing with bounded 
   assert.match(text, /Discovery request: Find featured cozy puzzle games/);
   assert.match(text, /Requested result limit: 8/);
   assert.match(text, /Preferred routing hint: featured/);
-  assert.match(text, /Choose exactly one primary path/);
+  assert.match(text, /Evaluate all plausible candidate discovery surfaces/);
+  assert.match(text, /choose exactly one primary path/i);
   assert.match(text, /at most one adjacent fallback/);
   assert.match(text, /steam_featured_scout/);
   assert.match(text, /steam_store_query/);
